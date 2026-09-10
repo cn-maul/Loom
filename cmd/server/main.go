@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"relationship/internal/ai"
 	"relationship/internal/config"
@@ -92,25 +93,37 @@ func main() {
 	if err != nil {
 		log.Printf("warning: load frontend: %v", err)
 	} else {
-		fileServer := http.FileServer(http.FS(frontendFS))
-
 		e.GET("/*", func(c echo.Context) error {
 			path := c.Request().URL.Path
-
-			// Try to serve the static file
-			f, err := frontendFS.Open(path)
-			if err == nil {
-				f.Close()
-				fileServer.ServeHTTP(c.Response(), c.Request())
-				return nil
+			if path == "/" {
+				path = "index.html"
+			} else {
+				path = path[1:] // remove leading /
 			}
 
-			// SPA fallback: serve index.html
-			indexHTML, err := fs.ReadFile(frontendFS, "index.html")
+			data, err := fs.ReadFile(frontendFS, path)
 			if err != nil {
-				return c.String(http.StatusNotFound, "Not Found")
+				// SPA fallback: serve index.html
+				data, err = fs.ReadFile(frontendFS, "index.html")
+				if err != nil {
+					return c.String(http.StatusNotFound, "Not Found")
+				}
+				return c.HTML(http.StatusOK, string(data))
 			}
-			return c.HTML(http.StatusOK, string(indexHTML))
+
+			// detect content type
+			ct := http.DetectContentType(data)
+			if strings.HasSuffix(path, ".js") {
+				ct = "application/javascript"
+			} else if strings.HasSuffix(path, ".css") {
+				ct = "text/css"
+			} else if strings.HasSuffix(path, ".html") {
+				ct = "text/html"
+			} else if strings.HasSuffix(path, ".svg") {
+				ct = "image/svg+xml"
+			}
+			c.Response().Header().Set(echo.HeaderContentType, ct)
+			return c.Blob(http.StatusOK, ct, data)
 		})
 	}
 
