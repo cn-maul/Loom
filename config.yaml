@@ -1,0 +1,15 @@
+server:
+  port: 8080
+  host: localhost
+
+database:
+  path: data/relationship.db
+
+llm:
+  endpoint: http://localhost:11434
+  protocol: openai
+  api_key: ""
+  extract_model: qwen3:8b
+  advice_model: deepseek-chat
+  embed_model: nomic-embed-text
+  embed_dim: 768
