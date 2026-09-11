@@ -5,6 +5,7 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { ErrorNote, Notice, Spinner, controlClass } from '../components/ui';
 import { aiApi, configApi } from '../api/client';
+import { PageHeader } from '../components/layout';
 import type { LLMConfig } from '../api/types';
 
 type Field = { key: keyof LLMConfig; label: string; hint?: string; type?: string; placeholder?: string };
@@ -135,15 +136,18 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-foreground">设置</h1>
-        {tab !== 'other' ? (
-          <Button onClick={save} disabled={saving}>
-            {saving ? '保存中…' : '保存配置'}
-          </Button>
-        ) : null}
-      </div>
+    <div>
+      <PageHeader
+        title="设置"
+        description="模型端点、协议与密钥；改完记得保存"
+        actions={
+          tab !== 'other' ? (
+            <Button onClick={save} disabled={saving}>
+              {saving ? '保存中…' : '保存配置'}
+            </Button>
+          ) : null
+        }
+      />
 
       {error ? <ErrorNote>{error}</ErrorNote> : null}
       {notice ? <Notice>{notice}</Notice> : null}

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Building2, Pencil } from 'lucide-react';
 import { EmptyState, ErrorNote, Notice, Spinner, controlClass } from '../components/ui';
 import { Button } from '../components/ui/button';
+import { PageHeader, SectionCard } from '../components/layout';
 import { organizationApi, personApi } from '../api/client';
 import type { Organization, OrgPositionLink, PersonWithActivity } from '../api/types';
 import { fullDate, todayISO } from '../format';
@@ -199,15 +200,20 @@ export default function Organizations() {
       {error ? <ErrorNote>{error}</ErrorNote> : null}
       {actionError ? <ErrorNote>{actionError}</ErrorNote> : null}
 
-      <div>
-        <h1 className="text-lg font-semibold text-foreground">组织</h1>
-        <p className="text-sm text-muted-foreground">这些人的组织背景：现任成员、历史任职；归档的组织不再出现在人物表单中。</p>
-      </div>
+      <PageHeader
+        title="组织"
+        description="这些人的组织背景：现任成员、历史任职；归档的组织不再出现在人物表单中"
+        actions={
+          <span className="text-xs text-muted-foreground">
+            {activeOrgs.length} 个在用
+            {archivedOrgs.length > 0 ? ` · ${archivedOrgs.length} 个已归档` : ''}
+          </span>
+        }
+      />
 
-      <div className="flex flex-col gap-6 lg:flex-row">
+      <div className="flex flex-col gap-5 lg:flex-row">
         <aside className="w-full shrink-0 space-y-4 lg:w-80">
-          <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-            <h2 className="mb-3 text-sm font-semibold text-foreground">新建组织</h2>
+          <SectionCard title="新建组织">
             <div className="space-y-2">
               <input
                 value={draft.name}
@@ -239,11 +245,11 @@ export default function Organizations() {
                 className={controlClass}
               />
             </div>
-          </div>
+          </SectionCard>
 
-          <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <SectionCard title="全部组织" bodyClassName="p-3">
             {orgs.length === 0 ? (
-              <EmptyState className="py-8">还没有组织。人物可以不归属任何组织。</EmptyState>
+              <p className="py-6 text-center text-sm text-muted-foreground">还没有组织。人物可以不归属任何组织。</p>
             ) : (
               <>
                 <ul className="space-y-1">
@@ -286,7 +292,7 @@ export default function Organizations() {
                 ) : null}
               </>
             )}
-          </div>
+          </SectionCard>
         </aside>
 
         <section className="min-w-0 flex-1">

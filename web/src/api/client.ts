@@ -90,6 +90,18 @@ export const personApi = {
     const query = search.toString();
     return request<PersonWithActivity[]>(`/persons${query ? `?${query}` : ''}`);
   },
+  /** Paged variant that also hands back the server's match count. */
+  listPaged: (params?: PersonListParams) => {
+    const search = new URLSearchParams();
+    if (params?.q) search.set('q', params.q);
+    if (params?.org_id) search.set('org_id', params.org_id);
+    if (params?.relation) search.set('relation', params.relation);
+    if (params?.sort) search.set('sort', params.sort);
+    if (params?.limit) search.set('limit', String(params.limit));
+    if (params?.offset) search.set('offset', String(params.offset));
+    const query = search.toString();
+    return requestPaged<PersonWithActivity[]>(`/persons${query ? `?${query}` : ''}`);
+  },
   get: (id: string) => request<Person>(`/persons/${id}`),
   create: (person: Partial<Person>) => request<Person>('/persons', { method: 'POST', body: JSON.stringify(person) }),
   update: (id: string, person: Partial<Person>) =>

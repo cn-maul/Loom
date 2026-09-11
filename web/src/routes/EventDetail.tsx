@@ -5,6 +5,7 @@ import { controlClass, EmptyState, ErrorNote, Notice, Spinner } from '../compone
 import { Button } from '../components/ui/button';
 import { EventStatusBadge } from '../components/EventStatus';
 import { eventApi, followUpApi, personApi } from '../api/client';
+import { PageHeader, SectionCard } from '../components/layout';
 import type { Event, EventParticipant, FollowUp, PersonWithActivity } from '../api/types';
 import { fullDate } from '../format';
 
@@ -213,52 +214,73 @@ export default function EventDetail() {
   const available = persons.filter((p) => !participants.some((q) => q.person_id === p.id));
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Link to="/events" className="text-primary">
-            记录
-          </Link>
-          <span>/</span>
-          <span className="font-mono">{fullDate(event.event_date)}</span>
-          <EventStatusBadge event={event} />
-          {event.manually_edited === 1 ? (
-            <span className="text-xs text-muted-foreground">人工修订过，重新提取会覆盖</span>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button
-            variant="outline"
-            className="h-8 text-muted-foreground"
-            disabled={busy === 'retry'}
-            onClick={() => void retry()}
-          >
-            <RefreshCw className={`mr-1 size-3.5 ${busy === 'retry' ? 'animate-spin' : ''}`} />
-            重新提取
-          </Button>
-          <Button
-            onClick={() => void remove()}
-            variant="outline"
-            disabled={busy === 'delete'}
-            className="h-8 text-muted-foreground hover:border-red-300 hover:text-red-600"
-          >
-            <Trash2 className="mr-1 size-3.5" />
-            删除
-          </Button>
-        </div>
-      </div>
+    <div>
+      <PageHeader
+        title={
+          <span className="flex flex-wrap items-center gap-2">
+            <Link to="/events" className="text-sm text-muted-foreground hover:text-primary">
+              记录
+            </Link>
+            <span className="text-sm text-muted-foreground">/</span>
+            <span className="font-mono">{fullDate(event.event_date)}</span>
+            <EventStatusBadge event={event} />
+            {event.manually_edited === 1 ? (
+              <span className="text-xs font-normal text-muted-foreground">人工修订过，重新提取会覆盖</span>
+            ) : null}
+          </span>
+        }
+        actions={
+          <>
+            <Button
+              variant="outline"
+              className="h-8 text-muted-foreground"
+              disabled={busy === 'retry'}
+              onClick={() => void retry()}
+            >
+              <RefreshCw className={`mr-1 size-3.5 ${busy === 'retry' ? 'animate-spin' : ''}`} />
+              重新提取
+            </Button>
+            <Button
+              onClick={() => void remove()}
+              variant="outline"
+              disabled={busy === 'delete'}
+              className="h-8 text-muted-foreground hover:border-red-300 hover:text-red-600"
+            >
+              <Trash2 className="mr-1 size-3.5" />
+              删除
+            </Button>
+          </>
+        }
+      />
 
-      {error ? <ErrorNote>{error}</ErrorNote> : null}
-
-      {event.extraction_status === 'failed' ? (
-        <Notice>
-          提取失败{event.extraction_error ? `：${event.extraction_error}` : ''}。模型配置可用后点「重新提取」，
-          也可以自己填写下面的内容。
-        </Notice>
+      {error ? (
+        <div className="mb-4">
+          <ErrorNote>{error}</ErrorNote>
+        </div>
       ) : null}
 
-      <div className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-        {editing ? (
+      {event.extraction_status === 'failed' ? (
+        <div className="mb-4">
+          <Notice>
+            提取失败{event.extraction_error ? `：${event.extraction_error}` : ''}。模型配置可用后点「重新提取」，
+            也可以自己填写下面的内容。
+          </Notice>
+        </div>
+      ) : null}
+
+      <div className="grid gap-5 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <SectionCard
+            title="记录内容"
+            actions={
+              editing ? null : (
+                <Button variant="ghost" size="sm" onClick={() => setEditing(true)} className="text-muted-foreground">
+                  编辑
+                </Button>
+              )
+            }
+          >
+            {editing ? (
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="space-y-1">
@@ -353,12 +375,6 @@ export default function EventDetail() {
           </div>
         ) : (
           <>
-            <div className="flex justify-end">
-              <Button variant="ghost" onClick={() => setEditing(true)} className="h-8 text-muted-foreground">
-                编辑
-              </Button>
-            </div>
-
             <dl className="space-y-2">
               {[
                 { label: '摘要', value: event.summary },
@@ -424,11 +440,12 @@ export default function EventDetail() {
             </p>
           </>
         )}
-      </div>
+          </SectionCard>
+        </div>
 
-      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold text-foreground">参与人（{participants.length}）</h2>
-        <ul className="mb-3 space-y-1">
+        <div className="space-y-5">
+          <SectionCard title={`参与人（${participants.length}）`}>
+            <ul className="mb-3 space-y-1">
           {participants.map((participant) => (
             <li key={participant.person_id} className="flex items-center justify-between gap-2 text-sm">
               <Link to={`/persons/${participant.person_id}`} className="text-primary hover:underline">
@@ -481,23 +498,24 @@ export default function EventDetail() {
             </Button>
           </div>
         ) : null}
-      </div>
+          </SectionCard>
 
-      {linked.length > 0 ? (
-        <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="mb-2 text-sm font-semibold text-foreground">由这条记录转出的跟进</h2>
-          <ul className="space-y-1 text-sm">
-            {linked.map((item) => (
-              <li key={item.id} className="flex items-center gap-2">
-                <Link to="/follow-ups" className="text-primary hover:underline">
-                  {item.title}
-                </Link>
-                <span className="text-xs text-muted-foreground">{item.status === 'completed' ? '已完成' : item.owner}</span>
-              </li>
-            ))}
-          </ul>
+          {linked.length > 0 ? (
+            <SectionCard title="由这条记录转出的跟进">
+              <ul className="space-y-1 text-sm">
+                {linked.map((item) => (
+                  <li key={item.id} className="flex items-center gap-2">
+                    <Link to="/follow-ups" className="text-primary hover:underline">
+                      {item.title}
+                    </Link>
+                    <span className="text-xs text-muted-foreground">{item.status === 'completed' ? '已完成' : item.owner}</span>
+                  </li>
+                ))}
+              </ul>
+            </SectionCard>
+          ) : null}
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }

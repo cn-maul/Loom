@@ -88,5 +88,40 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+    /* Put CJK families ahead of the generic ones so Chinese text does not fall
+       back to a Latin face with mismatched metrics. */
+    font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB',
+      'Noto Sans CJK SC', sans-serif;
+  }
+  ::selection {
+    @apply bg-primary/20;
+  }
+  /* Numeric columns (counts, dates) should not jitter as digits change. */
+  th,
+  td {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Unobtrusive scrollbars: the default ones look heavy against the light theme. */
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .scroll-slim::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+  }
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  /* Subtle lift for clickable rows and cards. */
+  .lift {
+    @apply transition-shadow duration-150 hover:shadow-md;
   }
 }

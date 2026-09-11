@@ -4,6 +4,7 @@ import { graphApi, relationshipApi } from '../api/client';
 import type { GraphCoLink, GraphData, GraphEdge, GraphNode, GraphOrg, Relationship } from '../api/types';
 import { ErrorNote, Spinner, controlClass } from '../components/ui';
 import { Button } from '../components/ui/button';
+import { PageHeader, SectionCard } from '../components/layout';
 import { fullDate } from '../format';
 
 // ── 画布尺寸与布局 ────────────────────────────────────────────
@@ -484,19 +485,39 @@ export default function Relationships() {
   }, [types, graph]);
 
   return (
-    <div className="space-y-4">
-      {error ? <ErrorNote>{error}</ErrorNote> : null}
+    <div>
+      <PageHeader
+        title="关系图谱"
+        description="人物与组织的连线：关系要手动记录，共同经历只作参考，不会自动推断成关系"
+        actions={
+          <Button
+            variant="outline"
+            onClick={() => {
+              // 从选中的person节点发起新关系，省一次下拉选择。
+              setForm({ ...EMPTY_FORM, from_person_id: selNodeId && isPerson(selNodeId) ? selNodeId : '' });
+              setSelEdgeId('');
+            }}
+          >
+            添加关系
+          </Button>
+        }
+      />
+      {error ? (
+        <div className="mb-4">
+          <ErrorNote>{error}</ErrorNote>
+        </div>
+      ) : null}
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
-        <div className="text-sm font-semibold text-foreground">关系图谱</div>
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={`${controlClass} h-9 w-32`}>
-          <option value="">全部类型</option>
-          {edgeTypes.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+      <SectionCard className="mb-5" bodyClassName="p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={`${controlClass} h-9 w-32`}>
+            <option value="">全部类型</option>
+            {edgeTypes.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
         <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)} className={`${controlClass} h-9 w-36`}>
           <option value="">全部组织</option>
           {orgs.map((org) => (
@@ -518,19 +539,12 @@ export default function Relationships() {
           <input type="checkbox" checked={showCo} onChange={(e) => setShowCo(e.target.checked)} />
           共同经历
         </label>
-        <div className="ml-auto">
-          <Button
-            variant="outline"
-            onClick={() => {
-              // 从选中的person节点发起新关系，省一次下拉选择。
-              setForm({ ...EMPTY_FORM, from_person_id: selNodeId && isPerson(selNodeId) ? selNodeId : '' });
-              setSelEdgeId('');
-            }}
-          >
-            添加关系
-          </Button>
+        <span className="ml-auto text-xs text-muted-foreground">
+          {visible.personIds.size} 人 · {visible.orgIds.size} 个组织 ·{' '}
+          {visible.relEdges.length + visible.posEdges.length + visible.coLinks.length} 条连线
+        </span>
         </div>
-      </div>
+      </SectionCard>
 
       <div className="flex flex-col gap-4 xl:flex-row">
         <div className="min-w-0 flex-1 rounded-xl border border-border bg-card p-2 shadow-sm">

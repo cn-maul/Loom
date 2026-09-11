@@ -15,19 +15,11 @@ node_modules/
 
 # Local run artifacts: server logs and the scratch files the build/verify
 # commands drop in the project root. They are regenerated every run and must
-# never reach the repository.
+# never reach the repository. Project docs are Markdown, so any .txt at the
+# root is scratch output by definition.
 *.log
-build_out.txt
-check.txt
-count.txt
-final_check.txt
-pkg_status.txt
-test_out.txt
-vet_out.txt
-web_build.txt
+/*.txt
 smoke_tmp/
-add.txt
-cleanup.txt
 
 # Per-session agent data (memory logs, skill scratch space)
 .workbuddy/

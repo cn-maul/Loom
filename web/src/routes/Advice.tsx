@@ -8,6 +8,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
 import { adviceApi, personApi } from '../api/client';
+import { PageHeader, SectionCard } from '../components/layout';
 import type { AdviceSession, PersonWithActivity } from '../api/types';
 import { relativeTime } from '../format';
 
@@ -97,8 +98,9 @@ export default function Advice() {
   const personName = persons.find((person) => person.id === personId)?.name ?? '';
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+    <div>
+      <PageHeader title="建议" description="问一个具体问题；每条结论都会带上它引用的记录，方便你核对" />
+      <SectionCard className="mb-5">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <PersonPicker persons={persons} value={personId} onChange={setPersonId} placeholder="选择要咨询的人物" />
           <span className="text-xs text-muted-foreground">AI 会结合画像、语义检索到的相关记录和近期事件</span>
@@ -127,15 +129,15 @@ export default function Advice() {
           </Button>
           {busy ? <Spinner label="AI 正在检索记录并生成（可能需要一两分钟）…" /> : null}
         </div>
-      </div>
+      </SectionCard>
 
-      {error ? <ErrorNote>{error}</ErrorNote> : null}
-      {advice ? <AdvicePanel advice={advice} personName={personName} onAdopted={setAdvice} /> : null}
+      <div className="space-y-4">
+        {error ? <ErrorNote>{error}</ErrorNote> : null}
+        {advice ? <AdvicePanel advice={advice} personName={personName} onAdopted={setAdvice} /> : null}
 
-      {history.length > 0 ? (
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <h3 className="mb-2 text-sm font-semibold text-foreground">这个人的建议历史</h3>
-          <ul className="divide-y divide-border">
+        {history.length > 0 ? (
+          <SectionCard title="这个人的建议历史" bodyClassName="p-3">
+            <ul className="divide-y divide-border">
             {history.map((item) => (
               <li key={item.id} className="flex items-start justify-between gap-3 py-2">
                 <button
@@ -160,17 +162,18 @@ export default function Advice() {
                 </Button>
               </li>
             ))}
-          </ul>
-        </div>
-      ) : null}
+            </ul>
+          </SectionCard>
+        ) : null}
 
-      <p className="text-xs text-muted-foreground">
-        建议会保存下来，之后可以回看当时问了什么、依据了哪些记录。也可以在
-        <Link to="/" className="mx-1 text-primary hover:underline">
-          人物列表
-        </Link>
-        里继续补充记录。
-      </p>
+        <p className="text-xs text-muted-foreground">
+          建议会保存下来，之后可以回看当时问了什么、依据了哪些记录。也可以在
+          <Link to="/" className="mx-1 text-primary hover:underline">
+            人物列表
+          </Link>
+          里继续补充记录。
+        </p>
+      </div>
     </div>
   );
 }

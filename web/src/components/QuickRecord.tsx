@@ -5,15 +5,18 @@ import { todayISO } from '../format';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { ErrorNote, Notice, Spinner, controlClass } from './ui';
+import { cn } from '../lib/utils';
 
 interface Props {
   personId: string;
   onRecorded: (event: Event, report: IngestReport) => void;
   /** Present when the host page can take the user straight to the advice flow. */
   onAsk?: (event: Event) => void;
+  /** Set when the host already wraps this in a card, to avoid double borders. */
+  bare?: boolean;
 }
 
-export default function QuickRecord({ personId, onRecorded, onAsk }: Props) {
+export default function QuickRecord({ personId, onRecorded, onAsk, bare = false }: Props) {
   const [text, setText] = useState('');
   const [date, setDate] = useState(todayISO());
   const [busy, setBusy] = useState(false);
@@ -42,16 +45,28 @@ export default function QuickRecord({ personId, onRecorded, onAsk }: Props) {
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <span className="text-sm font-medium text-foreground">记一笔</span>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className={`${controlClass} h-auto w-auto px-2 py-1 text-muted-foreground`}
-        />
-      </div>
+    <div className={cn(bare ? '' : 'rounded-xl border border-border bg-card p-4 shadow-sm')}>
+      {bare ? (
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <span className="text-xs text-muted-foreground">Ctrl / ⌘ + Enter 快速提交</span>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className={`${controlClass} h-8 w-auto px-2 py-0 text-xs text-muted-foreground`}
+          />
+        </div>
+      ) : (
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <span className="text-sm font-medium text-foreground">记一笔</span>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className={`${controlClass} h-auto w-auto px-2 py-1 text-muted-foreground`}
+          />
+        </div>
+      )}
 
       <Textarea
         value={text}

@@ -6,6 +6,7 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { reportApi, personApi } from '../api/client';
+import { PageHeader, SectionCard } from '../components/layout';
 import type { PersonWithActivity, Report, ReportFollowUpRef, ReportSnapshot } from '../api/types';
 import { fullDate, relativeTime } from '../format';
 
@@ -127,8 +128,12 @@ export default function Report() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+    <div>
+      <PageHeader
+        title="周报"
+        description="先汇总结构化事实，再让模型写叙述；模型不可用时保留大纲，不假装有结论"
+      />
+      <SectionCard className="mb-5">
         <div className="flex flex-wrap items-center gap-3">
           <PersonPicker persons={persons} value={personId} onChange={setPersonId} placeholder="全部人物" />
           <Input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="w-40" />
@@ -144,13 +149,13 @@ export default function Report() {
         <p className="mt-2 text-xs text-muted-foreground">
           不填日期则默认最近七天；报告生成后会保存为快照，可随时回看。
         </p>
-      </div>
+      </SectionCard>
 
       {error ? <ErrorNote>{error}</ErrorNote> : null}
       {busy ? <Spinner label="正在汇总记录并生成报告…" /> : null}
 
       {report ? (
-        <>
+        <div className="space-y-4">
           <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-semibold text-foreground">
@@ -249,7 +254,7 @@ export default function Report() {
               </ul>
             </div>
           ) : null}
-        </>
+        </div>
       ) : null}
 
       {history.length > 0 ? (
