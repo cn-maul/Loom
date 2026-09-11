@@ -1,0 +1,21 @@
+# Build outputs
+*.exe
+web/dist/
+internal/frontend/dist/
+data/*.db*
+
+# Secrets / credentials
+config.yaml
+
+# Node modules
+node_modules/
+
+# IDE settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS generated
+.DS_Store
+Thumbs.db
