@@ -1,0 +1,43 @@
+# Build outputs
+# internal/frontend/dist is the copy build.ps1/bat/sh makes of web/dist for
+# go:embed, so it is generated too and must not be committed.
+*.exe
+/relationship
+web/dist/
+internal/frontend/dist/
+data/
+
+# Secrets / credentials
+config.yaml
+
+# Node modules
+node_modules/
+
+# Local run artifacts: server logs and the scratch files the build/verify
+# commands drop in the project root. They are regenerated every run and must
+# never reach the repository.
+*.log
+build_out.txt
+check.txt
+count.txt
+final_check.txt
+pkg_status.txt
+test_out.txt
+vet_out.txt
+web_build.txt
+smoke_tmp/
+add.txt
+cleanup.txt
+
+# Per-session agent data (memory logs, skill scratch space)
+.workbuddy/
+
+# IDE settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS generated
+.DS_Store
+Thumbs.db
