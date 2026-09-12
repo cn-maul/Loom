@@ -18,10 +18,27 @@ func NewGraphService(persons *repository.PersonRepo, graph *repository.GraphRepo
 	return &GraphService{persons: persons, graph: graph}
 }
 
-// Build returns the whole graph in one payload. Person nodes reuse the person
-// list projection so node metadata (org, activity) matches the home page exactly.
-func (s *GraphService) Build() (*models.GraphData, error) {
-	persons, _, err := s.persons.ListFiltered(models.PersonFilter{})
+// Node limits. The graph ships in one payload for personal scale; a cap keeps
+// a data explosion from freezing the browser tab instead of degrading loudly.
+const (
+	DefaultMaxNodes = 1000
+	HardMaxNodes    = 5000
+)
+
+// Build returns the graph in one payload, capped at maxNodes person nodes.
+// maxNodes<=0 uses the default; values above the hard cap are clamped. Person
+// nodes reuse the person list projection so node metadata (org, activity)
+// matches the home page exactly. When more people exist than the cap allows,
+// Truncated/NodesTotal tell the frontend instead of silently hiding nodes.
+func (s *GraphService) Build(maxNodes int) (*models.GraphData, error) {
+	if maxNodes <= 0 {
+		maxNodes = DefaultMaxNodes
+	}
+	if maxNodes > HardMaxNodes {
+		maxNodes = HardMaxNodes
+	}
+
+	persons, total, err := s.persons.ListFiltered(models.PersonFilter{Limit: maxNodes})
 	if err != nil {
 		return nil, err
 	}
@@ -64,5 +81,7 @@ func (s *GraphService) Build() (*models.GraphData, error) {
 		Orgs:         orgs,
 		Edges:        edges,
 		CoAttendance: coLinks,
+		NodesTotal:   total,
+		Truncated:    total > len(nodes),
 	}, nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"relationship/internal/db"
+	"relationship/internal/config"
 	"relationship/internal/models"
 	"relationship/internal/repository"
 	"relationship/internal/service"
@@ -78,7 +79,9 @@ func newStructureAPI(t *testing.T) *structureFixture {
 
 	relHandler := NewRelationshipHandler(relService)
 	posHandler := NewPositionHandler(posService)
-	eventHandler := NewEventHandler(eventService, nil)
+	// This fixture never hits the create/extract paths, so a sync-mode ingest
+	// with no AI service is enough to satisfy the constructor.
+	eventHandler := NewEventHandler(eventService, nil, service.NewIngestService(nil, &config.LLMConfig{AsyncExtract: false}))
 
 	e := echo.New()
 	api := e.Group("/api")

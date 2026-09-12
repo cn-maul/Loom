@@ -18,6 +18,9 @@ export interface Person {
   notes: string;
   org_id: string;
   position: string;
+  /** male | female | ''，用户显式选择，不是 AI 推断。 */
+  gender: string;
+  is_self: number;
   created_at: string;
   updated_at: string;
 }
@@ -65,6 +68,9 @@ export interface GraphData {
   orgs: GraphOrg[];
   edges: GraphEdge[];
   co_attendance: GraphCoLink[];
+  /** Total person count in the store; when it exceeds nodes.length the payload was capped. */
+  nodes_total: number;
+  truncated: boolean;
 }
 
 export interface GraphNode {
@@ -151,6 +157,8 @@ export interface Event {
 /** Query for GET /events. */
 export interface EventListParams {
   person_id?: string;
+  /** 组织过滤：按出席人（主角或参与人）的归属组织筛选；'none' 表示未归属。 */
+  org_id?: string;
   from?: string;
   to?: string;
   q?: string;
@@ -165,6 +173,8 @@ export interface IngestReport {
   vectorized: boolean;
   traits_updated: number;
   warnings: string[];
+  /** True when extraction was queued: the record is stored, AI 结果稍后到达。 */
+  async?: boolean;
 }
 
 export interface IngestResult {
@@ -455,6 +465,31 @@ export interface ConfigUpdateResult {
   reindex_required: boolean;
 }
 
+// The "what happens with my data" panel. All facts the server already knows;
+// none of them include the token or keys themselves, only whether they are set.
+export interface PrivacyInfo {
+  listens_on: string;
+  ai_endpoint: string;
+  ai_endpoint_external: boolean;
+  sends_raw_text: boolean;
+  allow_remote: boolean;
+  auth_required: boolean;
+  backup_encrypted: boolean;
+  config_has_secret: boolean;
+}
+
+export interface AuditEntry {
+  id: string;
+  action: string;
+  path: string;
+  status: number;
+  created_at: string;
+}
+
+export interface AuditList {
+  entries: AuditEntry[];
+}
+
 export interface APIResponse<T> {
   ok: boolean;
   data: T;
@@ -462,4 +497,38 @@ export interface APIResponse<T> {
     code: string;
     message: string;
   };
+}
+
+
+/** GET /api/dashboard/stats 的落地页聚合。 */
+export interface DashboardPersonRef {
+  id: string;
+  name: string;
+  relation?: string;
+  org_name?: string;
+  gender?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DashboardEventRef {
+  id: string;
+  person_name?: string;
+  event_date: string;
+  summary?: string;
+  created_at?: string;
+}
+
+export interface DashboardStats {
+  persons_total: number;
+  orgs_total: number;
+  events_total: number;
+  traits_total: number;
+  relationships_total: number;
+  open_follow_ups: number;
+  overdue_follow_ups: number;
+  latest_person: DashboardPersonRef | null;
+  latest_trait_person: DashboardPersonRef | null;
+  latest_event: DashboardEventRef | null;
+  recent_persons: DashboardPersonRef[];
 }

@@ -104,7 +104,7 @@ func newReportFixture(t *testing.T, chatOK bool) *reportFixture {
 	}
 	f.person, f.other = person, other
 
-	aiService := NewAIService(cfg, vec, traitRepo, eventRepo, personRepo, ai.NewClient(cfg))
+	aiService := NewAIService(cfg, vec, traitRepo, eventRepo, personRepo, repository.NewRelationshipRepo(database), repository.NewPositionRepo(database), ai.NewClient(cfg))
 	f.svc = NewReportService(reportRepo, eventRepo, followUpRepo, relations, positions, persons, aiService)
 	return f
 }

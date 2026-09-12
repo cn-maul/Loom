@@ -35,6 +35,25 @@ func queryInt(c echo.Context, name string, fallback int) int {
 	return value
 }
 
+// MaxPageLimit caps any explicit ?limit= so a hand-crafted URL cannot ask for
+// a million rows in one response. limit<=0 keeps the documented "no paging"
+// behaviour — personal-scale lists stay cheap, and truncating an unpaginated
+// request silently would be worse than serving it.
+const MaxPageLimit = 500
+
+// queryLimit is queryInt with a defensive upper bound: an explicit limit above
+// max is clamped, a negative one falls back. Page math stays predictable.
+func queryLimit(c echo.Context, name string, fallback, max int) int {
+	v := queryInt(c, name, fallback)
+	if v < 0 {
+		return fallback
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 // queryBool reads an optional tri-state boolean: nil when the parameter is absent.
 func queryBool(c echo.Context, name string) (*bool, error) {
 	raw := c.QueryParam(name)

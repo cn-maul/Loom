@@ -22,6 +22,8 @@ type AIService struct {
 	traitRepo  *repository.TraitRepo
 	eventRepo  *repository.EventRepo
 	personRepo *repository.PersonRepo
+	relRepo    *repository.RelationshipRepo
+	posRepo    *repository.PositionRepo
 	client     *ai.Client
 }
 
@@ -31,6 +33,8 @@ func NewAIService(
 	traitRepo *repository.TraitRepo,
 	eventRepo *repository.EventRepo,
 	personRepo *repository.PersonRepo,
+	relRepo *repository.RelationshipRepo,
+	posRepo *repository.PositionRepo,
 	client *ai.Client,
 ) *AIService {
 	return &AIService{
@@ -39,6 +43,8 @@ func NewAIService(
 		traitRepo:  traitRepo,
 		eventRepo:  eventRepo,
 		personRepo: personRepo,
+		relRepo:    relRepo,
+		posRepo:    posRepo,
 		client:     client,
 	}
 }
@@ -92,6 +98,33 @@ func (s *AIService) IngestEvent(ctx context.Context, event *models.Event) (model
 	report.TraitsUpdated = updated
 
 	return report, nil
+}
+
+// CreatePendingEvent stores the fact row without calling the model: raw text,
+// date and participants land immediately with extraction_status='pending'. The
+// queued worker later turns it into a full record.
+func (s *AIService) CreatePendingEvent(event *models.Event) error {
+	event.ExtractionStatus = models.ExtractionPending
+	if event.Promises == "" {
+		event.Promises = "[]"
+	}
+	return s.eventRepo.Create(event)
+}
+
+// ListPendingEvents returns records stored but never extracted — the recovery
+// set the async queue re-enqueues on startup.
+func (s *AIService) ListPendingEvents() ([]*models.Event, error) {
+	all, err := s.eventRepo.ListAll()
+	if err != nil {
+		return nil, err
+	}
+	var pending []*models.Event
+	for _, e := range all {
+		if e.ExtractionStatus == models.ExtractionPending {
+			pending = append(pending, e)
+		}
+	}
+	return pending, nil
 }
 
 // RetryExtraction re-runs the extraction over a record already in the timeline.
@@ -308,6 +341,84 @@ func (s *AIService) indexTrait(ctx context.Context, trait *models.Trait) error {
 	return s.vecRepo.Insert(traitVectorID(trait.ID), embedding, trait.PersonID, "trait", trait.ID)
 }
 
+// structureContext renders a person's structured relations and current
+// postings into the lines the advice prompt can read. This is what closes the
+// loop between "I marked this person as my manager" and "the advice knows they
+// are my manager": a relationship edge or a posting is a fact the user recorded
+// on purpose, and it belongs in front of the model next to the profile.
+func (s *AIService) structureContext(person *models.Person) (string, []string) {
+	var lines []string
+	var cited []string
+
+	if s.relRepo != nil {
+		rels, err := s.relRepo.List(models.RelationshipFilter{PersonID: person.ID})
+		if err != nil {
+			log.Printf("warning: advice relationship context skipped: %v", err)
+		} else if len(rels) > 0 {
+			var b strings.Builder
+			for _, r := range rels {
+				if b.Len() > 0 {
+					b.WriteString("\n")
+				}
+				outgoing := r.FromPersonID == person.ID
+				other := r.ToPersonName
+				if !outgoing {
+					other = r.FromPersonName
+				}
+				dir := "—"
+				if r.Direction == models.DirectionDirected {
+					if outgoing {
+						dir = "→"
+					} else {
+						dir = "←"
+					}
+				}
+				line := fmt.Sprintf("%s %s %s（%s）", person.Name, dir, other, r.RelationType)
+				// A relationship that started or ended is a fact about time, not
+				// just a label; an undated edge stays bare.
+				switch {
+				case r.EndDate != "":
+					line += "（已结束 " + r.EndDate + "）"
+				case r.StartDate != "":
+					line += "（自 " + r.StartDate + "）"
+				}
+				if r.Confirmed == 0 {
+					line += "（未确认）"
+				}
+				b.WriteString(line)
+				if r.SourceEventID != "" {
+					cited = append(cited, r.SourceEventID)
+				}
+			}
+			lines = append(lines, "关系："+b.String())
+		}
+	}
+
+	if s.posRepo != nil {
+		positions, err := s.posRepo.ListByPerson(person.ID)
+		if err != nil {
+			log.Printf("warning: advice position context skipped: %v", err)
+		} else {
+			var current []string
+			for _, p := range positions {
+				if p.EndDate != "" {
+					continue
+				}
+				if p.Role != "" {
+					current = append(current, fmt.Sprintf("%s（%s）", p.OrgName, p.Role))
+				} else {
+					current = append(current, p.OrgName)
+				}
+			}
+			if len(current) > 0 {
+				lines = append(lines, "现任组织与职位："+strings.Join(current, "、"))
+			}
+		}
+	}
+
+	return strings.Join(lines, "\n"), cited
+}
+
 // AdviceDraft is a generated answer together with the exact context it was drawn
 // from, so the caller can persist a session that is reviewable later instead of
 // a response body that disappears with the page.
@@ -330,13 +441,31 @@ func (s *AIService) GenerateAdvice(ctx context.Context, req models.AdviceRequest
 		return nil, fmt.Errorf("list recent events: %w", err)
 	}
 	var notes string
-	if person, err := s.personRepo.GetByID(req.PersonID); err == nil {
-		notes = person.Notes
+	var person *models.Person
+	if p, err := s.personRepo.GetByID(req.PersonID); err == nil {
+		person = p
+		notes = p.Notes
+	}
+
+	// The user's structured relations and postings are facts they recorded on
+	// purpose; they belong in the prompt alongside the profile, not only on the
+	// graph page. A question like "how do I ask my manager" needs the model to
+	// know who the manager is.
+	structureLines := ""
+	structureCited := []string{}
+	if person != nil {
+		structureLines, structureCited = s.structureContext(person)
 	}
 
 	related, relatedTraits, retrievalStatus := s.retrieveRelated(ctx, req.PersonID, req.Question)
 
-	seen := make(map[string]bool, len(recent)+len(related))
+	seen := make(map[string]bool, len(recent)+len(related)+len(structureCited))
+	// A relationship edge citing a record means that record was part of the
+	// structured context too; fold it into the evidence set so a stale source is
+	// still visible as stale rather than silently dropped.
+	for _, id := range structureCited {
+		seen[id] = true
+	}
 	var evidence []*models.Event
 	for _, e := range append(append([]*models.Event{}, related...), recent...) {
 		if e == nil || seen[e.ID] {
@@ -401,7 +530,7 @@ func (s *AIService) GenerateAdvice(ctx context.Context, req models.AdviceRequest
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		resp, err := s.client.Chat(ctx, s.cfg.AdviceModel, []ai.Message{
-			ai.System(fmt.Sprintf(advicePrompt, joinOr(traitLines, "无"), notes, goalLine, joinOr(eventLines, "无"))),
+			ai.System(fmt.Sprintf(advicePrompt, joinOr(traitLines, "无"), notes, joinOr([]string{strings.TrimSpace(structureLines)}, "无"), goalLine, joinOr(eventLines, "无"))),
 			ai.User(req.Question),
 		}, ai.ChatOptions{JSONMode: true, Temperature: 0.7, MaxTokens: 8000})
 		if err != nil {

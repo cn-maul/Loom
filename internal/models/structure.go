@@ -120,9 +120,12 @@ type EventParticipant struct {
 
 // EventFilter narrows the record list query across primary person and
 // participants. Status filters on the extraction state, which is how the UI
-// finds the records that need a retry.
+// finds the records that need a retry. OrgID filters by the organisation of any
+// attendee (primary person or participant), with the sentinel "none" meaning
+// people who belong to no organisation.
 type EventFilter struct {
 	PersonID string
+	OrgID    string
 	From     string
 	To       string
 	Query    string

@@ -35,7 +35,7 @@ func (h *AdviceHandler) Generate(c echo.Context) error {
 
 // List serves the advice history. Without person_id it is the all-people view.
 func (h *AdviceHandler) List(c echo.Context) error {
-	sessions, err := h.advice.List(c.QueryParam("person_id"), queryInt(c, "limit", 0), queryInt(c, "offset", 0))
+	sessions, err := h.advice.List(c.QueryParam("person_id"), queryLimit(c, "limit", 0, MaxPageLimit), queryInt(c, "offset", 0))
 	if err != nil {
 		return respondError(c, err, "LIST_FAILED")
 	}

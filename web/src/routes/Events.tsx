@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { NotebookPen, RefreshCw } from 'lucide-react';
 import { controlClass, ErrorNote, Spinner } from '../components/ui';
 import { Button } from '../components/ui/button';
-import { EventStatusBadge } from '../components/EventStatus';
-import { EmptyState, PageHeader, SectionCard, Toolbar } from '../components/layout';
-import { eventApi, personApi } from '../api/client';
-import type { Event, EventListParams, PersonWithActivity } from '../api/types';
-import { eventHeadline, fullDate, relativeTime } from '../format';
+import { EmptyState, PageHeader } from '../components/layout';
+import { eventApi, organizationApi, personApi } from '../api/client';
+import type { Event, EventListParams, Organization, PersonWithActivity } from '../api/types';
+import { eventHeadline, shortDate } from '../format';
 
 const PAGE_SIZE = 20;
 
@@ -18,21 +17,11 @@ const STATUS_OPTIONS = [
   { value: 'failed', label: '提取失败' },
 ];
 
-/** Records are returned newest first, so grouping by date is a single pass. */
-function groupByDate(events: Event[]): { date: string; items: Event[] }[] {
-  const groups: { date: string; items: Event[] }[] = [];
-  for (const event of events) {
-    const last = groups[groups.length - 1];
-    if (last && last.date === event.event_date) last.items.push(event);
-    else groups.push({ date: event.event_date, items: [event] });
-  }
-  return groups;
-}
-
 export default function Events() {
   const [events, setEvents] = useState<Event[]>([]);
   const [total, setTotal] = useState(0);
   const [persons, setPersons] = useState<PersonWithActivity[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
 
   const [searchInput, setSearchInput] = useState('');
   const [filters, setFilters] = useState<EventListParams>({});
@@ -77,6 +66,10 @@ export default function Events() {
       .list()
       .then(setPersons)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    organizationApi
+      .list()
+      .then(setOrganizations)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
   const retry = async (event: Event) => {
@@ -98,81 +91,106 @@ export default function Events() {
 
   const hasMore = events.length < total;
   const filtered = Object.values(filters).some((value) => value !== undefined && value !== '');
-  const groups = useMemo(() => groupByDate(events), [events]);
+  // 主人物不在 participants 里时按 id 回查名字（列表接口只回 person_id）。
+  const personNames = new Map(persons.map((p) => [p.id, p.name]));
+  const participantsLabel = (event: Event) => {
+    const names = event.participants.map((p) => p.person_name ?? '').filter(Boolean);
+    if (names.length > 0) return names.join('、');
+    return personNames.get(event.person_id) ?? '';
+  };
 
   return (
     <div>
       <PageHeader
-        title="记录"
-        description={
-          loading ? undefined : total > 0 ? `共 ${total} 条，已显示 ${events.length} 条` : '写下的每次接触都会出现在这里'
+        className="items-center"
+        title={
+          <span className="flex items-baseline gap-2.5">
+            记录
+            {!loading && total > 0 ? (
+              <span className="whitespace-nowrap text-xs font-normal text-muted-foreground">
+                共 {total} 条，已显示 {events.length} 条
+              </span>
+            ) : null}
+          </span>
         }
-      />
-
-      <SectionCard className="mb-5" bodyClassName="p-3">
-        <Toolbar>
-          <input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="搜索原文或摘要…"
-            className={`${controlClass} h-9 w-full sm:w-64`}
-          />
-          <select
-            value={filters.person_id ?? ''}
-            onChange={(e) => setFilters((prev) => ({ ...prev, person_id: e.target.value }))}
-            className={`${controlClass} h-9 w-auto text-muted-foreground`}
-            title="按人物筛选（含参与人）"
-          >
-            <option value="">全部人物</option>
-            {persons.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filters.status ?? ''}
-            onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
-            className={`${controlClass} h-9 w-auto text-muted-foreground`}
-            title="按提取状态筛选"
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <div className="flex items-center gap-1">
+        actions={
+          <div className="flex flex-nowrap items-center justify-end gap-1.5">
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="搜索…"
+              className={`${controlClass} h-8 w-32 text-sm`}
+              title="搜索原文或摘要"
+            />
+            <select
+              value={filters.org_id ?? ''}
+              onChange={(e) => setFilters((prev) => ({ ...prev, org_id: e.target.value }))}
+              className={`${controlClass} h-8 w-24 text-sm text-muted-foreground`}
+              title="按组织筛选"
+            >
+              <option value="">全部组织</option>
+              <option value="none">未归属</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filters.person_id ?? ''}
+              onChange={(e) => setFilters((prev) => ({ ...prev, person_id: e.target.value }))}
+              className={`${controlClass} h-8 w-24 text-sm text-muted-foreground`}
+              title="按人物筛选（含参与人）"
+            >
+              <option value="">全部人物</option>
+              {persons.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filters.status ?? ''}
+              onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+              className={`${controlClass} h-8 w-20 text-sm text-muted-foreground`}
+              title="按提取状态筛选"
+            >
+              {STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
             <input
               type="date"
               value={filters.from ?? ''}
               onChange={(e) => setFilters((prev) => ({ ...prev, from: e.target.value }))}
-              className={`${controlClass} h-9 w-36`}
+              className={`${controlClass} h-8 w-28 text-sm`}
               title="起始日期"
             />
-            <span className="text-xs text-muted-foreground">至</span>
+            <span className="shrink-0 text-xs text-muted-foreground">至</span>
             <input
               type="date"
               value={filters.to ?? ''}
               onChange={(e) => setFilters((prev) => ({ ...prev, to: e.target.value }))}
-              className={`${controlClass} h-9 w-36`}
+              className={`${controlClass} h-8 w-28 text-sm`}
               title="结束日期"
             />
+            {filtered ? (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setSearchInput('');
+                  setFilters({});
+                }}
+                className="h-8 shrink-0 px-2 text-sm text-muted-foreground"
+              >
+                清空
+              </Button>
+            ) : null}
           </div>
-          {filtered ? (
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setSearchInput('');
-                setFilters({});
-              }}
-              className="h-9 text-muted-foreground"
-            >
-              清空筛选
-            </Button>
-          ) : null}
-        </Toolbar>
-      </SectionCard>
+        }
+      />
 
       {error ? (
         <div className="mb-4">
@@ -196,56 +214,62 @@ export default function Events() {
           }
         />
       ) : (
-        <div className="space-y-5">
-          {groups.map((group) => (
-            <div key={group.date}>
-              {/* Date rail: the list is chronological, so the day is the heading. */}
-              <div className="mb-2 flex items-center gap-3">
-                <span className="text-sm font-medium text-foreground">{fullDate(group.date)}</span>
-                <span className="text-xs text-muted-foreground">{relativeTime(group.date)}</span>
-                <span className="h-px flex-1 bg-border" />
-                <span className="text-xs text-muted-foreground">{group.items.length} 条</span>
-              </div>
-
-              <ul className="space-y-2">
-                {group.items.map((event) => (
-                  <li
-                    key={event.id}
-                    className="lift rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/40"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <Link to={`/events/${event.id}`} className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          {event.record_type ? (
-                            <span className="rounded-full bg-secondary px-2 py-0.5 text-secondary-foreground">
-                              {event.record_type}
-                            </span>
-                          ) : null}
-                          {event.channel ? <span>{event.channel}</span> : null}
-                          {event.manually_edited === 1 ? <span>· 已人工修订</span> : null}
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs text-muted-foreground">
+                  <th className="w-20 px-4 py-2.5 font-medium">日期</th>
+                  <th className="w-40 px-3 py-2.5 font-medium">参与人</th>
+                  <th className="px-3 py-2.5 font-medium">摘要</th>
+                  <th className="px-3 py-2.5 font-medium">原文</th>
+                  <th className="w-16 px-3 py-2.5 font-medium">AI处理</th>
+                  <th className="w-24 px-4 py-2.5 text-right font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map((event) => {
+                  const status =
+                    event.extraction_status === 'succeeded'
+                      ? { label: '已处理', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' }
+                      : event.extraction_status === 'failed'
+                        ? { label: '失败', cls: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400' }
+                        : { label: '待处理', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400' };
+                  return (
+                    <tr key={event.id} className="border-b border-border/60 transition-colors last:border-0 hover:bg-muted/50">
+                      <td className="whitespace-nowrap px-4 py-3 tabular-nums text-muted-foreground">
+                        {shortDate(event.event_date)}
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="max-w-[10rem] truncate" title={participantsLabel(event)}>
+                          {participantsLabel(event) || '—'}
                         </div>
-                        <p className="mt-1.5 line-clamp-2 text-sm leading-6 text-foreground">
-                          {eventHeadline(event.summary, event.raw_text)}
-                        </p>
-                        {event.participants.length > 0 ? (
-                          <p className="mt-1 truncate text-xs text-muted-foreground">
-                            参与：
-                            {event.participants
-                              .map((p) =>
-                                p.role && p.role !== 'primary' ? `${p.person_name ?? ''}（${p.role}）` : (p.person_name ?? ''),
-                              )
-                              .join('、')}
-                          </p>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Link
+                          to={`/events/${event.id}`}
+                          className="block max-w-[22rem] truncate text-foreground hover:text-primary"
+                          title={eventHeadline(event.summary, event.raw_text)}
+                        >
+                          {eventHeadline(event.summary, event.raw_text) || '（无摘要）'}
+                        </Link>
+                        {event.manually_edited === 1 ? (
+                          <span className="text-xs text-muted-foreground">已人工修订</span>
                         ) : null}
-                        {event.extraction_status === 'failed' && event.extraction_error ? (
-                          <p className="mt-1 truncate text-xs text-red-600 dark:text-red-400">{event.extraction_error}</p>
-                        ) : null}
-                      </Link>
-
-                      <div className="flex shrink-0 flex-col items-end gap-2">
-                        <EventStatusBadge event={event} />
+                      </td>
+                      <td className="px-3 py-3 text-muted-foreground">
+                        <div className="max-w-[18rem] truncate" title={event.raw_text}>
+                          {event.raw_text || '—'}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${status.cls}`} title={event.extraction_error}>
+                          {status.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           className="h-7 px-2 text-xs text-muted-foreground"
                           disabled={retrying === event.id}
                           onClick={() => void retry(event)}
@@ -254,21 +278,21 @@ export default function Events() {
                           <RefreshCw className={`mr-1 size-3 ${retrying === event.id ? 'animate-spin' : ''}`} />
                           重新提取
                         </Button>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-
-          {hasMore ? (
-            <Button variant="outline" onClick={() => void load(events.length)} disabled={loadingMore} className="w-full">
-              {loadingMore ? '载入中…' : `加载更多（还有 ${total - events.length} 条）`}
-            </Button>
-          ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
+
+      {hasMore ? (
+        <Button variant="outline" onClick={() => void load(events.length)} disabled={loadingMore} className="mt-4 w-full">
+          {loadingMore ? '载入中…' : `加载更多（还有 ${total - events.length} 条）`}
+        </Button>
+      ) : null}
     </div>
   );
 }

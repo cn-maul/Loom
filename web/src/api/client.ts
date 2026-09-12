@@ -1,10 +1,13 @@
 import type {
+  DashboardStats,
   AdoptRequest,
   AdviceRequest,
   AdviceSession,
   AppConfig,
   APIResponse,
+  AuditList,
   ConfigUpdateResult,
+  PrivacyInfo,
   Event,
   EventListParams,
   EventParticipant,
@@ -29,11 +32,47 @@ import type {
 
 const BASE_URL = '/api';
 
+// Access token support. The token lives in localStorage only — the server never
+// receives it from GET /config, and a settings-page change is a purely local
+// edit of config.yaml anyway. Every request carries it as X-Auth-Token; a 401
+// surfaces as a global event so the app can prompt once instead of every call
+// failing separately.
+const TOKEN_KEY = 'loom.auth_token';
+
+export const authToken = {
+  get: (): string => {
+    try {
+      return localStorage.getItem(TOKEN_KEY) ?? '';
+    } catch {
+      return '';
+    }
+  },
+  set: (token: string) => {
+    try {
+      if (token) localStorage.setItem(TOKEN_KEY, token);
+      else localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      // Private-mode storage quota etc.: auth simply stays off this session.
+    }
+  },
+};
+
+export const UNAUTHORIZED_EVENT = 'loom:unauthorized';
+export const QUICK_RECORD_EVENT = 'loom:quick-record';
+
+function authHeaders(): Record<string, string> {
+  const token = authToken.get();
+  return token ? { 'X-Auth-Token': token } : {};
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE_URL}${url}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init?.headers as Record<string, string>) },
   });
+  if (response.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+  }
 
   // Error bodies are JSON, but a crashed proxy or a raw 404 page is not, so a
   // failed parse must still surface as a readable error rather than a SyntaxError.
@@ -57,9 +96,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
  *  carries, so the caller can show the whole match count next to one page. */
 async function requestPaged<T>(url: string, init?: RequestInit): Promise<{ data: T; total: number }> {
   const response = await fetch(`${BASE_URL}${url}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init?.headers as Record<string, string>) },
   });
+  if (response.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+  }
   const text = await response.text();
   let parsed: APIResponse<T> | null = null;
   if (text) {
@@ -163,6 +205,7 @@ export const eventApi = {
   list: (params: EventListParams = {}) => {
     const search = new URLSearchParams();
     if (params.person_id) search.set('person_id', params.person_id);
+    if (params.org_id) search.set('org_id', params.org_id);
     if (params.from) search.set('from', params.from);
     if (params.to) search.set('to', params.to);
     if (params.q) search.set('q', params.q);
@@ -264,15 +307,26 @@ export const followUpApi = {
 };
 
 export const configApi = {
-  get: () => request<AppConfig>('/config'),
+  get: () => request<{ config: AppConfig; privacy: PrivacyInfo }>('/config'),
   update: (llmConfig: Partial<LLMConfig>) =>
     request<ConfigUpdateResult>('/config', { method: 'PUT', body: JSON.stringify(llmConfig) }),
+};
+
+// The audit trail lists who did what to the data — every mutating call plus
+// whole-dataset exports — newest first.
+export const auditApi = {
+  list: (limit = 100) => request<AuditList>(`/audit?limit=${limit}`),
 };
 
 // The graph endpoint ships the whole canvas in one payload; filtering happens
 // client-side because the dataset is personal-CRM sized.
 export const graphApi = {
   get: () => request<GraphData>('/graph'),
+};
+
+// The landing page reads one aggregate instead of five separate lists.
+export const dashboardApi = {
+  stats: () => request<DashboardStats>('/dashboard/stats'),
 };
 
 export const relationshipApi = {

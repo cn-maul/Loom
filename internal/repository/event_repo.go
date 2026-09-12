@@ -164,6 +164,16 @@ func eventFilterClause(filter models.EventFilter) (string, []any) {
 			SELECT 1 FROM event_participants ep WHERE ep.event_id = e.id AND ep.person_id = ?))`
 		args = append(args, filter.PersonID, filter.PersonID)
 	}
+	if filter.OrgID == "none" {
+		where += ` AND (e.person_id IN (SELECT id FROM persons WHERE org_id IS NULL)
+			OR EXISTS (SELECT 1 FROM event_participants ep JOIN persons op ON op.id = ep.person_id
+				WHERE ep.event_id = e.id AND op.org_id IS NULL))`
+	} else if filter.OrgID != "" {
+		where += ` AND (e.person_id IN (SELECT id FROM persons WHERE org_id = ?)
+			OR EXISTS (SELECT 1 FROM event_participants ep JOIN persons op ON op.id = ep.person_id
+				WHERE ep.event_id = e.id AND op.org_id = ?))`
+		args = append(args, filter.OrgID, filter.OrgID)
+	}
 	if filter.From != "" {
 		where += ` AND e.event_date >= ?`
 		args = append(args, filter.From)

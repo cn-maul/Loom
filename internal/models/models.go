@@ -67,6 +67,9 @@ type Person struct {
 	Notes      string `json:"notes"`
 	OrgID      string `json:"org_id"`
 	Position   string `json:"position"`
+	// Gender is an explicit choice the user records: male / female, empty when
+	// not set. It is a fact about the person, not an inference.
+	Gender string `json:"gender"`
 	// IsSelf marks the person the user is themselves, so relationship edges can
 	// be phrased from "me" without guessing which node is the subject.
 	IsSelf    int       `json:"is_self"`
@@ -472,6 +475,10 @@ type IngestReport struct {
 	Vectorized    bool     `json:"vectorized"`
 	TraitsUpdated int      `json:"traits_updated"`
 	Warnings      []string `json:"warnings"`
+	// Async is true when extraction was queued instead of run inline. The
+	// record is stored and visible now; the summary, index and profile refresh
+	// land later. Poll the record or GET /api/tasks to observe progress.
+	Async bool `json:"async"`
 }
 
 type ReindexResult struct {

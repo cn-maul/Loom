@@ -505,9 +505,7 @@ export default function EventDetail() {
               <ul className="space-y-1 text-sm">
                 {linked.map((item) => (
                   <li key={item.id} className="flex items-center gap-2">
-                    <Link to="/follow-ups" className="text-primary hover:underline">
-                      {item.title}
-                    </Link>
+                    <span className="font-medium text-foreground">{item.title}</span>
                     <span className="text-xs text-muted-foreground">{item.status === 'completed' ? '已完成' : item.owner}</span>
                   </li>
                 ))}

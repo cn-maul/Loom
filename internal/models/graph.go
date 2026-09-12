@@ -8,6 +8,11 @@ type GraphData struct {
 	Orgs         []*GraphOrg    `json:"orgs"`
 	Edges        []*GraphEdge   `json:"edges"`
 	CoAttendance []*GraphCoLink `json:"co_attendance"`
+	// NodesTotal counts every person in the store; when it exceeds len(Nodes)
+	// the payload was capped and Truncated says so explicitly — a silent
+	// half-graph looks exactly like a sparse social life.
+	NodesTotal int  `json:"nodes_total"`
+	Truncated  bool `json:"truncated"`
 }
 
 // GraphNode is one person on the canvas. OrgID/OrgName and EventCount exist so

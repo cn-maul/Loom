@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { eventApi } from '../api/client';
-import type { Event, IngestReport } from '../api/types';
+import { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
+import { eventApi, organizationApi, personApi } from '../api/client';
+import type { Event, IngestReport, Organization, PersonWithActivity } from '../api/types';
 import { todayISO } from '../format';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -14,14 +15,38 @@ interface Props {
   onAsk?: (event: Event) => void;
   /** Set when the host already wraps this in a card, to avoid double borders. */
   bare?: boolean;
+  /** Show the org → person picker for co-participants (relationship records). */
+  participantPicker?: boolean;
 }
 
-export default function QuickRecord({ personId, onRecorded, onAsk, bare = false }: Props) {
+/** A co-participant attached to the record: a structured relation to a real
+ *  person in the database, not a free-text mention. */
+type Picked = { person_id: string; person_name: string; org_name: string };
+
+export default function QuickRecord({ personId, onRecorded, onAsk, bare = false, participantPicker = false }: Props) {
   const [text, setText] = useState('');
   const [date, setDate] = useState(todayISO());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [report, setReport] = useState<IngestReport | null>(null);
+
+  // Co-participant picker state: two-level cascade (organisation → person).
+  const [orgs, setOrgs] = useState<Organization[]>([]);
+  const [persons, setPersons] = useState<PersonWithActivity[]>([]);
+  const [pickerOrg, setPickerOrg] = useState('');
+  const [pickerPerson, setPickerPerson] = useState('');
+  const [picked, setPicked] = useState<Picked[]>([]);
+
+  useEffect(() => {
+    if (!participantPicker) return;
+    // The picker is optional decoration; a failed load must not block writing.
+    Promise.all([organizationApi.list(), personApi.list()])
+      .then(([orgList, personList]) => {
+        setOrgs(orgList);
+        setPersons(personList);
+      })
+      .catch(() => undefined);
+  }, [participantPicker]);
 
   const submit = async (ask: boolean) => {
     const raw = text.trim();
@@ -31,9 +56,27 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false 
     setError('');
     setReport(null);
     try {
-      const result = await eventApi.create({ person_id: personId, event_date: date, raw_text: raw });
+      // Participants travel inside the text as a machine-readable header so the
+      // extraction model treats the record as an interaction with these people,
+      // plus a structured participants link for queries and the graph.
+      const hint = picked.length ? `【共同参与：${picked.map((p) => p.person_name).join('、')}】\n` : '';
+      const result = await eventApi.create({ person_id: personId, event_date: date, raw_text: hint + raw });
+      if (picked.length) {
+        try {
+          await eventApi.setParticipants(
+            result.event.id,
+            picked.map((p) => ({ person_id: p.person_id })),
+          );
+        } catch (e) {
+          result.report.warnings = [
+            ...result.report.warnings,
+            `记录已保存，但共同参与标记失败：${e instanceof Error ? e.message : String(e)}`,
+          ];
+        }
+      }
       setText('');
       setDate(todayISO());
+      setPicked([]);
       setReport(result.report);
       onRecorded(result.event, result.report);
       if (ask) onAsk?.(result.event);
@@ -44,11 +87,24 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false 
     }
   };
 
+  const pickerCandidates = persons.filter(
+    (p) =>
+      p.id !== personId &&
+      !picked.some((x) => x.person_id === p.id) &&
+      (pickerOrg === 'none' ? !p.org_id : pickerOrg ? p.org_id === pickerOrg : false),
+  );
+
+  const addPicked = () => {
+    const person = persons.find((p) => p.id === pickerPerson);
+    if (!person) return;
+    setPicked((current) => [...current, { person_id: person.id, person_name: person.name, org_name: person.org_name || '' }]);
+    setPickerPerson('');
+  };
+
   return (
     <div className={cn(bare ? '' : 'rounded-xl border border-border bg-card p-4 shadow-sm')}>
       {bare ? (
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <span className="text-xs text-muted-foreground">Ctrl / ⌘ + Enter 快速提交</span>
+        <div className="mb-2 flex items-center justify-end gap-3">
           <input
             type="date"
             value={date}
@@ -79,6 +135,70 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false 
         className="resize-y text-base leading-6"
       />
 
+      {participantPicker ? (
+        <div className="mt-3 rounded-lg border border-dashed border-border p-3">
+          <p className="mb-2 text-xs leading-5 text-muted-foreground">
+            共同参与的人（可选）：选中的人物会关联到这条记录，AI 会把它理解为一次双方互动，而不是随口提到谁。
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={pickerOrg}
+              onChange={(e) => {
+                setPickerOrg(e.target.value);
+                setPickerPerson('');
+              }}
+              className={`${controlClass} h-8 w-40 text-xs`}
+              aria-label="选择组织"
+            >
+              <option value="">选择组织…</option>
+              {orgs.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+              <option value="none">未归属人物</option>
+            </select>
+            <select
+              value={pickerPerson}
+              onChange={(e) => setPickerPerson(e.target.value)}
+              className={`${controlClass} h-8 w-40 text-xs`}
+              aria-label="选择人名"
+              disabled={!pickerOrg}
+            >
+              <option value="">选择人名…</option>
+              {pickerCandidates.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <Button size="sm" variant="outline" onClick={addPicked} disabled={!pickerPerson}>
+              添加
+            </Button>
+          </div>
+          {picked.length > 0 ? (
+            <ul className="mt-2 flex flex-wrap gap-1.5">
+              {picked.map((p) => (
+                <li
+                  key={p.person_id}
+                  className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs text-foreground"
+                >
+                  {p.person_name}
+                  {p.org_name ? <span className="text-muted-foreground">（{p.org_name}）</span> : null}
+                  <button
+                    onClick={() => setPicked((current) => current.filter((x) => x.person_id !== p.person_id))}
+                    aria-label={`移除${p.person_name}`}
+                    className="text-muted-foreground hover:text-red-600"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <Button onClick={() => submit(false)} disabled={busy || !text.trim()}>
           记录
@@ -99,6 +219,12 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false 
       {error ? (
         <div className="mt-3">
           <ErrorNote>{error}</ErrorNote>
+        </div>
+      ) : null}
+
+      {report && report.async ? (
+        <div className="mt-3">
+          <Notice>已保存。AI 正在后台提取摘要、画像和索引，稍后刷新即可看到结果。</Notice>
         </div>
       ) : null}
 

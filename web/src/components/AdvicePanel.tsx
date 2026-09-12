@@ -134,13 +134,7 @@ export default function AdvicePanel({ advice, personName, onAdopted }: Props) {
       </div>
 
       {followUpIds.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          已从这份建议转出 {followUpIds.length} 条跟进事项，
-          <Link to="/follow-ups" state={{ personId: advice.person_id }} className="text-primary hover:underline">
-            在跟进列表里查看
-          </Link>
-          。
-        </p>
+        <p className="text-xs text-muted-foreground">已从这份建议转出 {followUpIds.length} 条跟进事项。</p>
       ) : null}
       {error ? <ErrorNote>{error}</ErrorNote> : null}
 

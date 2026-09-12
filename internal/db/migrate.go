@@ -259,6 +259,23 @@ var schemaMigrations = []migration{
 			`ALTER TABLE organizations ADD COLUMN archived_at TEXT`,
 		},
 	},
+	{
+		version: 9,
+		name:    "audit log for sensitive operations",
+		// Exports, restores, deletes and index rebuilds change or expose the
+		// whole dataset. One middleware writes them here, so "who did what to
+		// my data" stays answerable even in a single-user local app.
+		steps: []string{
+			`CREATE TABLE IF NOT EXISTS audit_log (
+				id TEXT PRIMARY KEY,
+				action TEXT NOT NULL,
+				path TEXT NOT NULL,
+				status INTEGER NOT NULL,
+				created_at TEXT DEFAULT (datetime('now'))
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC)`,
+		},
+	},
 }
 
 // runMigrations applies the baseline schema, the legacy column additions and every
@@ -274,6 +291,7 @@ func runMigrations(db *sql.DB) error {
 		{"persons", "org_id", "TEXT REFERENCES organizations(id) ON DELETE SET NULL"},
 		{"persons", "position", "TEXT"},
 		{"persons", "is_self", "INTEGER NOT NULL DEFAULT 0"},
+		{"persons", "gender", "TEXT"},
 	} {
 		if err := ensureColumn(db, column.table, column.name, column.def); err != nil {
 			return err

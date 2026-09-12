@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { graphApi, relationshipApi } from '../api/client';
 import type { GraphCoLink, GraphData, GraphEdge, GraphNode, GraphOrg, Relationship } from '../api/types';
-import { ErrorNote, Spinner, controlClass } from '../components/ui';
+import { ErrorNote, Notice, Spinner, controlClass } from '../components/ui';
 import { Button } from '../components/ui/button';
 import { PageHeader, SectionCard } from '../components/layout';
 import { fullDate } from '../format';
@@ -505,6 +505,14 @@ export default function Relationships() {
       {error ? (
         <div className="mb-4">
           <ErrorNote>{error}</ErrorNote>
+        </div>
+      ) : null}
+      {graph?.truncated ? (
+        <div className="mb-4">
+          <Notice>
+            图谱节点数超出单页上限，当前只显示 {graph.nodes.length} / {graph.nodes_total} 个人物。
+            用搜索或筛选定位目标，数据量长期超出时考虑给图谱页加分页。
+          </Notice>
         </div>
       ) : null}
 

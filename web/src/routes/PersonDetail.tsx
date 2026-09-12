@@ -1,33 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Building2, NotebookPen, Star } from 'lucide-react';
+import { Building2, MessageSquareText, NotebookPen, X } from 'lucide-react';
 import EventTimeline from '../components/EventTimeline';
 import QuickRecord from '../components/QuickRecord';
 import TraitList from '../components/TraitList';
-import { ErrorNote, Spinner, controlClass } from '../components/ui';
+import { ErrorNote, Spinner } from '../components/ui';
 import { Button } from '../components/ui/button';
 import { Textarea } from '../components/ui/textarea';
-import { positionApi, organizationApi, followUpApi, personApi, relationshipApi } from '../api/client';
-import { Avatar, EmptyState, Field, SectionCard } from '../components/layout';
-import type {
-  Event,
-  FollowUp,
-  OrgPositionLink,
-  Organization,
-  Person,
-  RelationshipLink,
-  Trait,
-} from '../api/types';
+import { organizationApi, personApi, reportApi } from '../api/client';
+import { Avatar, EmptyState, SectionCard } from '../components/layout';
+import type { Event, Organization, Person, Trait } from '../api/types';
 import { fullDate, shortDate, todayISO } from '../format';
 
-const EMPTY_POSITION = { org_id: '', role: '', start_date: '', end_date: '', notes: '' };
-
-const FOLLOW_UP_LABEL: Record<string, string> = {
-  pending: '待办',
-  waiting: '等待对方',
-  completed: '已完成',
-  cancelled: '已取消',
+/** What the 人物概览 card shows: one AI-written paragraph over a recent window. */
+type ProfileSnapshot = {
+  summary: string;
+  status: 'succeeded' | 'failed';
+  failure_reason?: string;
+  start: string;
+  end: string;
+  generated_at: string;
 };
+
+/** Local-calendar YYYY-MM-DD; toISOString would drift a day off in GMT+8 mornings. */
+const localDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 export default function PersonDetail() {
   const { id = '' } = useParams();
@@ -37,60 +34,46 @@ export default function PersonDetail() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [traits, setTraits] = useState<Trait[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
-  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
-  const [positions, setPositions] = useState<OrgPositionLink[]>([]);
-  const [colleagues, setColleagues] = useState<OrgPositionLink[]>([]);
-  const [relationships, setRelationships] = useState<RelationshipLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionError, setActionError] = useState('');
 
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ relation: '', importance: 3, notes: '', position: '', org_id: '' });
-  const [saving, setSaving] = useState(false);
+  // The AI profile paragraph: latest snapshot if one exists, generated on demand.
+  const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
+  const [profileBusy, setProfileBusy] = useState(false);
 
+  // Popup surfaces: recording a moment and asking the AI about this person.
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
   const [question, setQuestion] = useState('');
-  const [positionForm, setPositionForm] = useState(EMPTY_POSITION);
-  const [addingPosition, setAddingPosition] = useState(false);
-  const [savingPosition, setSavingPosition] = useState(false);
-
-  const reloadPositions = useCallback(async () => {
-    if (!id) return;
-    setPositions(await positionApi.byPerson(id));
-  }, [id]);
 
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const [personData, traitData, eventData, followUpData, positionData, relationData] = await Promise.all([
+      const [personData, traitData, eventData, reportList] = await Promise.all([
         personApi.get(id),
         personApi.traits(id),
         personApi.events(id),
-        followUpApi.byPerson(id),
-        positionApi.byPerson(id),
-        relationshipApi.byPerson(id),
+        reportApi.list(id),
       ]);
       setPerson(personData);
-      setDraft({
-        relation: personData.relation,
-        importance: personData.importance,
-        notes: personData.notes,
-        position: personData.position,
-        org_id: personData.org_id,
-      });
       setTraits(traitData);
       setEvents(eventData);
-      setFollowUps(followUpData);
-      setPositions(positionData);
-      setRelationships(relationData);
-      // Colleagues are derived from the person's own posting, so they can only
-      // be fetched once the person is known.
-      if (personData.org_id) {
-        const members = await organizationApi.members(personData.org_id, true);
-        setColleagues(members.filter((member) => member.person_id !== id));
-      } else {
-        setColleagues([]);
-      }
+      // The newest snapshot stands in for the profile paragraph until the user
+      // asks for a fresh one; a failed generation still shows its reason.
+      const latest = reportList.find((r) => r.status === 'succeeded') ?? reportList[0] ?? null;
+      setProfile(
+        latest
+          ? {
+              summary: latest.summary,
+              status: latest.status,
+              failure_reason: latest.failure_reason,
+              start: latest.start,
+              end: latest.end,
+              generated_at: latest.generated_at,
+            }
+          : null,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -103,11 +86,10 @@ export default function PersonDetail() {
     setError('');
     setActionError('');
     // Everything below is per-person state: leaving it behind would show the
-    // previous person's draft question or edit form on the next one.
+    // previous person's draft question on the next one.
     setQuestion('');
-    setEditing(false);
-    setAddingPosition(false);
-    setPositionForm(EMPTY_POSITION);
+    setRecordOpen(false);
+    setAskOpen(false);
     void load();
     organizationApi
       .list()
@@ -115,26 +97,41 @@ export default function PersonDetail() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, [load]);
 
-  const save = async () => {
-    if (!person) return;
-    setSaving(true);
-    setError('');
+  // Escape closes either popup; the rest of the page waits.
+  useEffect(() => {
+    if (!recordOpen && !askOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setRecordOpen(false);
+        setAskOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [recordOpen, askOpen]);
+
+  // The profile window is the last 30 days: "近期" with enough depth to show a
+  // pattern rather than one meeting.
+  const generateProfile = async () => {
+    if (!person || profileBusy) return;
+    setProfileBusy(true);
+    setActionError('');
     try {
-      const updated = await personApi.update(person.id, {
-        ...person,
-        relation: draft.relation,
-        importance: draft.importance,
-        notes: draft.notes,
-        position: draft.position,
-        org_id: draft.org_id,
+      const end = todayISO();
+      const start = localDate(new Date(Date.now() - 29 * 24 * 60 * 60 * 1000));
+      const report = await reportApi.generate({ person_id: person.id, start, end });
+      setProfile({
+        summary: report.summary,
+        status: report.status,
+        failure_reason: report.failure_reason,
+        start: report.start,
+        end: report.end,
+        generated_at: report.generated_at,
       });
-      setPerson(updated);
-      setEditing(false);
-      await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setActionError(e instanceof Error ? e.message : String(e));
     } finally {
-      setSaving(false);
+      setProfileBusy(false);
     }
   };
 
@@ -147,59 +144,6 @@ export default function PersonDetail() {
       navigate('/');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const addPosition = async () => {
-    if (!person || !positionForm.org_id) return;
-    setSavingPosition(true);
-    setActionError('');
-    try {
-      await positionApi.create(person.id, {
-        org_id: positionForm.org_id,
-        role: positionForm.role || undefined,
-        start_date: positionForm.start_date || undefined,
-        end_date: positionForm.end_date || undefined,
-        notes: positionForm.notes || undefined,
-      });
-      setPositionForm(EMPTY_POSITION);
-      setAddingPosition(false);
-      await reloadPositions();
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSavingPosition(false);
-    }
-  };
-
-  // Ending a stint keeps the row: the history of where someone worked is part
-  // of the record, so only the end date is written.
-  const endPosition = async (pos: OrgPositionLink) => {
-    if (!person) return;
-    setActionError('');
-    try {
-      await positionApi.update(pos.id, {
-        person_id: pos.person_id,
-        org_id: pos.org_id,
-        role: pos.role,
-        start_date: pos.start_date,
-        end_date: todayISO(),
-        notes: pos.notes,
-      });
-      await reloadPositions();
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const removePosition = async (pos: OrgPositionLink) => {
-    if (!window.confirm(`删除「${pos.org_name}」这段任职记录？此操作不可撤销。`)) return;
-    setActionError('');
-    try {
-      await positionApi.remove(pos.id);
-      await reloadPositions();
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -222,8 +166,6 @@ export default function PersonDetail() {
   const eventLabels: Record<string, string> = {};
   for (const event of events) eventLabels[event.id] = shortDate(event.event_date);
   const currentOrg = organizations.find((org) => org.id === person.org_id);
-  const orgOptions = organizations.filter((org) => !org.archived_at);
-  const openFollowUps = followUps.filter((item) => item.status === 'pending' || item.status === 'waiting').length;
 
   return (
     <div>
@@ -238,7 +180,7 @@ export default function PersonDetail() {
         </div>
       ) : null}
 
-      {/* Headline: who this is, and the three numbers worth glancing at. */}
+      {/* Headline: who this is, plus the two actions worth reaching from here. */}
       <div className="mb-5 rounded-xl border border-border bg-card p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 gap-4">
@@ -251,123 +193,69 @@ export default function PersonDetail() {
                     {person.relation}
                   </span>
                 ) : null}
-                <span className="inline-flex items-center gap-px" title={`重要度 ${person.importance}/5`}>
-                  {Array.from({ length: Math.max(1, Math.min(5, person.importance)) }, (_, index) => (
-                    <Star key={index} className="size-3.5 fill-amber-400 text-amber-400" />
-                  ))}
-                </span>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 {[currentOrg?.name, person.position].filter(Boolean).join(' · ') || '未填写组织与职位'} · 建档于{' '}
                 {fullDate(person.created_at)}
               </p>
-              {!editing && person.notes ? (
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{person.notes}</p>
-              ) : null}
             </div>
           </div>
 
-          <div className="flex items-start gap-5">
-            <div className="flex gap-5 text-center">
-              <div>
-                <div className="text-xl font-semibold tabular-nums text-foreground">{events.length}</div>
-                <div className="text-xs text-muted-foreground">记录</div>
-              </div>
-              <div>
-                <div className="text-xl font-semibold tabular-nums text-foreground">{traits.length}</div>
-                <div className="text-xs text-muted-foreground">画像</div>
-              </div>
-              <div>
-                <div className="text-xl font-semibold tabular-nums text-foreground">{openFollowUps}</div>
-                <div className="text-xs text-muted-foreground">待办</div>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              {editing ? (
-                <Button onClick={() => void save()} disabled={saving}>
-                  {saving ? '保存中…' : '保存'}
-                </Button>
-              ) : (
-                <Button onClick={() => setEditing(true)} variant="outline">
-                  编辑
-                </Button>
-              )}
-              <Button
-                onClick={() => void removePerson()}
-                variant="outline"
-                className="text-muted-foreground hover:border-red-300 hover:text-red-600"
-              >
-                删除
-              </Button>
-            </div>
+          <div className="flex shrink-0 gap-2">
+            <Button onClick={() => setRecordOpen(true)}>
+              <NotebookPen className="size-4" />
+              新增记录
+            </Button>
+            <Button variant="outline" onClick={() => setAskOpen(true)}>
+              <MessageSquareText className="size-4" />
+              问一下
+            </Button>
           </div>
         </div>
-
-        {editing ? (
-          <div className="mt-4 grid gap-3 border-t border-border pt-4 md:grid-cols-3">
-            <Field label="关系">
-              <input
-                value={draft.relation}
-                onChange={(e) => setDraft({ ...draft, relation: e.target.value })}
-                className={`${controlClass} h-9`}
-              />
-            </Field>
-            <Field label="职位">
-              <input
-                value={draft.position}
-                onChange={(e) => setDraft({ ...draft, position: e.target.value })}
-                placeholder="如：后端工程师"
-                className={`${controlClass} h-9`}
-              />
-            </Field>
-            <Field label="所属组织">
-              <select
-                value={draft.org_id}
-                onChange={(e) => setDraft({ ...draft, org_id: e.target.value })}
-                className={`${controlClass} h-9 text-muted-foreground`}
-              >
-                <option value="">无组织</option>
-                {orgOptions.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="重要度（1-5）">
-              <input
-                type="number"
-                min={1}
-                max={5}
-                value={draft.importance}
-                onChange={(e) => setDraft({ ...draft, importance: Number(e.target.value) || 3 })}
-                className={`${controlClass} h-9`}
-              />
-            </Field>
-            <div className="md:col-span-2">
-              <Field label="备注">
-                <textarea
-                  value={draft.notes}
-                  onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
-                  rows={2}
-                  className={`${controlClass} h-auto`}
-                />
-              </Field>
-            </div>
-          </div>
-        ) : null}
       </div>
 
-      {/* Two columns: the writing surface on the left, everything derived on the right. */}
-      <div className="grid gap-5 lg:grid-cols-3">
-        <div className="space-y-5 lg:col-span-2">
-          <SectionCard title="记一笔" description="写完之后会自动提取摘要、感受与承诺">
-            <QuickRecord personId={person.id} onRecorded={() => void load()} bare />
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        {/* —— 左 2/3：概览、关系、时间线 —— */}
+        <div className="min-w-0 space-y-5">
+          <SectionCard
+            title="人物概览"
+            actions={
+              <Button size="sm" variant="outline" onClick={() => void generateProfile()} disabled={profileBusy}>
+                {profileBusy ? '生成中…' : profile ? '重新生成' : '生成画像'}
+              </Button>
+            }
+          >
+            {profileBusy ? (
+              <Spinner label="AI 正在汇总近 30 天的记录…" />
+            ) : profile && profile.status === 'succeeded' && profile.summary ? (
+              <>
+                <p className="text-sm leading-7 text-foreground">{profile.summary}</p>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  统计窗口 {profile.start} ~ {profile.end} · 生成于 {fullDate(profile.generated_at)}
+                </p>
+              </>
+            ) : profile && profile.status === 'failed' ? (
+              <p className="text-sm text-muted-foreground">上次生成失败：{profile.failure_reason || '未知原因'}，可重试。</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                还没有画像。点右上角「生成画像」，AI 会汇总近 30 天与 TA 有关的记录，写成一段画像。
+              </p>
+            )}
+
+            <div className="mt-4 border-t border-border pt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-muted-foreground hover:border-red-300 hover:text-red-600"
+                onClick={() => void removePerson()}
+              >
+                删除这个人物（不可撤销）
+              </Button>
+            </div>
           </SectionCard>
 
           <SectionCard
             title="时间线"
-            description="以 TA 为主角或参与人的记录"
             actions={
               <Link to="/events" className="text-xs text-muted-foreground hover:text-primary">
                 全部记录
@@ -376,29 +264,13 @@ export default function PersonDetail() {
           >
             <EventTimeline events={events} />
           </SectionCard>
-
-          <SectionCard title="直接问 AI" description="带着这个问题去建议页，回答会引用这里的记录">
-            <Textarea
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              rows={2}
-              placeholder={`关于${person.name}的问题，例如「下次找他帮忙该怎么开口」`}
-              className="resize-y text-base leading-6"
-            />
-            <Button
-              onClick={() => navigate('/advice', { state: { personId: person.id, question } })}
-              disabled={!question.trim()}
-              className="mt-3"
-            >
-              去问 AI
-            </Button>
-          </SectionCard>
         </div>
 
-        <div className="space-y-5">
+        {/* —— 右 1/3：AI 画像的采纳与剔除 —— */}
+        <aside className="min-w-0 space-y-5">
           <SectionCard
             title="AI 画像"
-            description="✓ 采纳，✗ 剔除；新记录会自动更新"
+            description="✓ 采纳，✗ 剔除；新记录会自动更新，依据失效的条目会提示重算"
             actions={<span className="text-xs text-muted-foreground">{traits.length} 条</span>}
           >
             <TraitList
@@ -420,278 +292,84 @@ export default function PersonDetail() {
               }
             />
           </SectionCard>
-
-          <SectionCard
-            title="组织与任职"
-            actions={
-              <>
-                <Link to="/organizations" className="text-xs text-muted-foreground hover:text-primary">
-                  组织管理
-                </Link>
-                <Button variant="outline" size="sm" onClick={() => setAddingPosition((current) => !current)}>
-                  {addingPosition ? '取消' : '添加任职'}
-                </Button>
-              </>
-            }
-          >
-            {addingPosition ? (
-              <div className="mb-4 grid gap-3 rounded-lg border border-dashed border-border p-3 md:grid-cols-2">
-                <div className="md:col-span-2">
-                  <Field label="组织">
-                    <select
-                      value={positionForm.org_id}
-                      onChange={(e) => setPositionForm({ ...positionForm, org_id: e.target.value })}
-                      className={`${controlClass} h-9 text-muted-foreground`}
-                    >
-                      <option value="">请选择</option>
-                      {orgOptions.map((org) => (
-                        <option key={org.id} value={org.id}>
-                          {org.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
-                <Field label="角色 / 职位">
-                  <input
-                    value={positionForm.role}
-                    onChange={(e) => setPositionForm({ ...positionForm, role: e.target.value })}
-                    placeholder="如：后端工程师"
-                    className={`${controlClass} h-9`}
-                  />
-                </Field>
-                <Field label="起始">
-                  <input
-                    type="date"
-                    value={positionForm.start_date}
-                    onChange={(e) => setPositionForm({ ...positionForm, start_date: e.target.value })}
-                    className={`${controlClass} h-9`}
-                  />
-                </Field>
-                <Field label="结束" hint="留空表示在职">
-                  <input
-                    type="date"
-                    value={positionForm.end_date}
-                    onChange={(e) => setPositionForm({ ...positionForm, end_date: e.target.value })}
-                    className={`${controlClass} h-9`}
-                  />
-                </Field>
-                <Field label="备注">
-                  <input
-                    value={positionForm.notes}
-                    onChange={(e) => setPositionForm({ ...positionForm, notes: e.target.value })}
-                    className={`${controlClass} h-9`}
-                  />
-                </Field>
-                <div className="md:col-span-2">
-                  <Button size="sm" onClick={() => void addPosition()} disabled={savingPosition || !positionForm.org_id}>
-                    {savingPosition ? '保存中…' : '保存任职'}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-
-            {positions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">还没有任职记录。添加之后，这个人的工作经历会完整保留。</p>
-            ) : (
-              <ul className="space-y-2">
-                {positions.map((pos) => {
-                  const current = !pos.end_date;
-                  return (
-                    <li
-                      key={pos.id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
-                    >
-                      <div className="min-w-0 text-sm">
-                        <Link to="/organizations" className="font-medium text-foreground hover:text-primary">
-                          {pos.org_name}
-                        </Link>
-                        {pos.role ? <span className="ml-2 text-muted-foreground">{pos.role}</span> : null}
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          <span
-                            className={`mr-1 rounded px-1.5 py-0.5 ${
-                              current ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300' : 'bg-muted text-muted-foreground'
-                            }`}
-                          >
-                            {current ? '在职' : '已结束'}
-                          </span>
-                          {pos.start_date ? pos.start_date : '?'}
-                          {pos.end_date ? ` → ${pos.end_date}` : ' 至今'}
-                        </span>
-                        {pos.notes ? <p className="mt-0.5 text-xs text-muted-foreground">{pos.notes}</p> : null}
-                      </div>
-                      <div className="flex gap-2">
-                        {current ? (
-                          <Button size="sm" variant="outline" onClick={() => void endPosition(pos)}>
-                            结束
-                          </Button>
-                        ) : null}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-muted-foreground hover:text-red-600"
-                          onClick={() => void removePosition(pos)}
-                        >
-                          删除
-                        </Button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-
-            {currentOrg ? (
-              <div className="mt-4 border-t border-border pt-3">
-                <p className="text-sm text-foreground">
-                  {currentOrg.name}
-                  {currentOrg.kind ? <span className="ml-2 text-xs text-muted-foreground">{currentOrg.kind}</span> : null}
-                </p>
-                {currentOrg.description ? (
-                  <p className="mt-1 text-sm leading-6 text-muted-foreground">{currentOrg.description}</p>
-                ) : null}
-                {colleagues.length > 0 ? (
-                  <div className="mt-2">
-                    <p className="mb-1.5 text-xs text-muted-foreground">同组织现任</p>
-                    <ul className="flex flex-wrap gap-1.5">
-                      {colleagues.map((member) => (
-                        <li key={member.id}>
-                          <Link
-                            to={`/persons/${member.person_id}`}
-                            className="flex items-center gap-1.5 rounded-full border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-                          >
-                            <Avatar name={member.person_name ?? ''} id={member.person_id} size="sm" className="size-5 text-[10px]" />
-                            {member.person_name}
-                            {member.role ? `（${member.role}）` : ''}
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </SectionCard>
-
-          <SectionCard
-            title="关系"
-            actions={
-              <Link
-                to="/relationships"
-                state={{ personId: person.id }}
-                className="text-xs text-muted-foreground hover:text-primary"
-              >
-                在图谱中查看
-              </Link>
-            }
-          >
-            {relationships.length === 0 ? (
-              <p className="text-sm leading-6 text-muted-foreground">
-                还没有关系记录。关系只能在图谱页手动添加——同场出现只算共同经历，不会自动推断成关系。
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {relationships.map((rel) => {
-                  const outgoing = rel.from_person_id === person.id;
-                  const otherId = outgoing ? rel.to_person_id : rel.from_person_id;
-                  const otherName = outgoing ? rel.to_person_name : rel.from_person_name;
-                  const ended = Boolean(rel.end_date);
-                  return (
-                    <li key={rel.id} className="rounded-lg border border-border px-3 py-2 text-sm">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Avatar name={otherName ?? ''} id={otherId} size="sm" className="size-6 text-[10px]" />
-                        <span className="font-medium text-foreground">
-                          {outgoing ? `${person.name} → ` : ''}
-                          <Link to={`/persons/${otherId}`} className="hover:text-primary">
-                            {otherName}
-                          </Link>
-                          {outgoing ? '' : ` → ${person.name}`}
-                        </span>
-                        <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{rel.relation_type}</span>
-                        {rel.direction === 'undirected' ? <span className="text-xs text-muted-foreground">双向</span> : null}
-                        {rel.confirmed ? null : <span className="text-xs text-amber-700 dark:text-amber-400">未确认</span>}
-                        {ended ? <span className="text-xs text-muted-foreground">已结束 {rel.end_date}</span> : null}
-                        {rel.start_date ? <span className="text-xs text-muted-foreground">起 {rel.start_date}</span> : null}
-                      </div>
-                      {rel.notes ? <p className="mt-1 text-xs leading-5 text-muted-foreground">{rel.notes}</p> : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </SectionCard>
-
-          <SectionCard
-            title="跟进事项"
-            actions={
-              <Link
-                to="/follow-ups"
-                state={{ personId: person.id }}
-                className="text-xs text-muted-foreground hover:text-primary"
-              >
-                全部事项
-              </Link>
-            }
-          >
-            {followUps.length === 0 ? (
-              <p className="text-sm leading-6 text-muted-foreground">
-                暂无跟进事项。记录里的承诺或建议里采纳的策略会出现在这里。
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {followUps.map((item) => {
-                  const open = item.status === 'pending' || item.status === 'waiting';
-                  const overdue = open && item.due_date && item.due_date < todayISO();
-                  return (
-                    <li
-                      key={item.id}
-                      className={`rounded-lg border bg-card px-3 py-2 ${
-                        overdue ? 'border-red-300/60 dark:border-red-500/40' : 'border-border'
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span
-                          className={`size-1.5 shrink-0 rounded-full ${
-                            item.status === 'completed'
-                              ? 'bg-emerald-500'
-                              : overdue
-                                ? 'bg-red-500'
-                                : item.status === 'waiting'
-                                  ? 'bg-amber-500'
-                                  : 'bg-blue-500'
-                          }`}
-                        />
-                        <Link to={`/follow-ups?person=${item.person_id}`} className="font-medium text-foreground hover:text-primary">
-                          {item.title}
-                        </Link>
-                        <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                          {FOLLOW_UP_LABEL[item.status] ?? item.status}
-                        </span>
-                        {item.owner ? <span className="text-xs text-muted-foreground">{item.owner}的球</span> : null}
-                        {item.due_date ? (
-                          <span className={`text-xs ${overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
-                            {overdue ? '逾期 ' : ''}
-                            {fullDate(item.due_date)}
-                          </span>
-                        ) : null}
-                      </div>
-                      {item.description ? <p className="mt-1 text-sm leading-6 text-muted-foreground">{item.description}</p> : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </SectionCard>
-        </div>
+        </aside>
       </div>
 
-      {events.length === 0 ? (
-        <div className="mt-5">
-          <EmptyState
-            icon={<NotebookPen className="size-6" />}
-            title={`还没有和${person.name}的记录`}
-            description="写第一条：什么时候、在哪儿、说了什么。"
-          />
+      {/* —— 新增记录：弹出式窗口 —— */}
+      {recordOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-4 pt-[8vh] backdrop-blur-sm"
+          onClick={() => setRecordOpen(false)}
+        >
+          <div
+            className="w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+              <h2 className="text-sm font-semibold text-foreground">新增记录 · {person.name}</h2>
+              <button onClick={() => setRecordOpen(false)} aria-label="关闭" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="p-5">
+              <QuickRecord
+                personId={person.id}
+                participantPicker
+                onRecorded={() => {
+                  setRecordOpen(false);
+                  void load();
+                }}
+                bare
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* —— 问一下：弹出式提问窗口 —— */}
+      {askOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-4 pt-[14vh] backdrop-blur-sm"
+          onClick={() => setAskOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+              <h2 className="text-sm font-semibold text-foreground">问一下 · {person.name}</h2>
+              <button onClick={() => setAskOpen(false)} aria-label="关闭" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="p-5">
+              <Textarea
+                autoFocus
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                rows={4}
+                placeholder={`关于${person.name}的问题，例如「下次找他帮忙该怎么开口」`}
+                className="resize-y text-base leading-6"
+              />
+              <p className="mt-2 text-xs text-muted-foreground">回答会引用 TA 的记录和关系。</p>
+              <div className="mt-3 flex justify-end gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setAskOpen(false)}>
+                  取消
+                </Button>
+                <Button
+                  onClick={() => {
+                    setAskOpen(false);
+                    navigate('/advice', { state: { personId: person.id, question } });
+                    setQuestion('');
+                  }}
+                  disabled={!question.trim()}
+                >
+                  <MessageSquareText className="size-4" />
+                  去问 AI
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

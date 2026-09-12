@@ -253,6 +253,13 @@ llm
   advice_model deepseek-chat          # 建议生成可切云端
   embed_model nomic-embed-text        # 768 维
   embed_dim 768
+  async_extract true                  # 记录创建后由后台队列提取（false 回退同步）
+
+backup
+  enabled true                        # 随进程运行的定时快照
+  dir backups                         # 快照目录（相对工作目录）
+  interval_hours 24                   # 首次快照在启动约 15 秒后，此后按间隔
+  keep 14                             # 保留数量，超出自动清理最旧的
 ```
 
 如果一开始没有本地 Ollama，可以先全用云端 API（DeepSeek 性价比高），后续再切换。
@@ -260,6 +267,54 @@ llm
 `api_key` 可以省略：本地端点（Ollama、LM Studio）不需要凭证，但底层的 chat 客户端
 拒绝空密钥，所以未配置时会自动使用一个占位值，否则每次提取都会在发出请求前就以
 `api key is required` 失败。云端服务照常在配置里或设置页填写真实密钥。
+
+### 5.5 备份与恢复
+
+数据安全是 Loom 的硬要求，自动备份默认开启：
+
+- **快照**：`VACUUM INTO` 写临时文件后原子改名，WAL 下也是一致快照；
+  手动快照 `POST /api/backups`，列表与调度状态见 `GET /api/backups`、`/status`。
+- **导出**：`GET /api/export?mode=full|redacted`。脱敏导出在序列化前清空
+  记录原文、画像正文、建议与报告内容并替换姓名，可安全用于分析或共享结构。
+- **恢复**：`POST /api/backups/restore` 先做完整性/核心表/迁移版本/外键校验，
+  通过后暂存，**重启 Loom 生效**。运行中的服务不会热替换数据库文件。
+- **向量索引**：恢复后如提示 vec_memory 缺失或维度不符，`POST /api/ai/reindex`
+  只重建索引，不影响事实数据。
+
+备份失败的最后一次错误通过 `GET /api/backups/status` 暴露——静默的备份缺口
+等于没有备份。
+
+### 5.6 隐私与安全
+
+数据高度敏感，安全状态必须是可见的事实，不是阅读源码才能得出的结论：
+
+- **访问令牌**：`config.yaml` 设 `server.auth_token` 后，所有 `/api` 请求需要
+  令牌（设置页「隐私与安全」填入，只存本浏览器）。默认不开启；绑定非
+  localhost 地址且未开令牌时启动会打印醒目告警。
+- **数据边界**：`llm.allow_remote: false` 时拒绝把记录内容发送到任何非本机
+  端点（提取 prompt 必然包含原文，云端端点即数据出境）。使用云端 API 必须显式
+  设为 true。该开关只在 config.yaml 生效，设置页不会修改它。
+- **备份加密**：`backup.passphrase` 非空时快照以 AES-256-GCM 加密存储
+  （`.db.enc`），校验与恢复透明解密；口令丢失则加密快照不可恢复，请妥善保管。
+- **审计**：所有变更操作与整库导出记入审计日志，`GET /api/audit` 可查。
+- **隐私面板**：`GET /api/config` 返回当前数据去向事实（监听地址、AI 端点是否
+  外部、是否发送原文、令牌/加密是否开启），设置页「隐私与安全」展示。
+
+### 5.7 运维与发布
+
+- **发布管线**：`powershell -ExecutionPolicy Bypass -File scripts\release.ps1`
+  （POSIX 用 `release.sh`）一条命令完成 `go vet` → 全量测试（契约金样在此强制生效）→
+  前端构建 → 后端构建 → 临时库迁移冒烟（版本头 / 404 包络 / 维护端点）。
+  任何一步失败即非零退出，不产出半成品发布物。
+- **月度恢复演练**：`powershell -ExecutionPolicy Bypass -File scripts\drill.ps1` 在临时
+  目录全链路演练（建数据 → 快照 → 校验 → 删除记录 → 两阶段恢复 → 重启验证），
+  不接触真实数据；通过标准是最后一行 `DRILL PASSED`。每月至少一次，改动备份/恢复/
+  迁移路径后加跑。
+- **数据治理**：每次启动自动清理孤儿向量（事实已不存在的向量行）；
+  `POST /api/maintenance/cleanup` 可手动触发并返回计数报告。审计日志默认永久保留，
+  `maintenance.audit_retention_days` 可显式缩短。失败提取任务无需清理：队列历史
+  自剪 500 条上限，失败的记录保留原文（原文是事实）。
+- **发布检查清单 / 迁移检查 / 回滚方案**：见 `docs/RELEASE.md`。
 
 ---
 
@@ -836,8 +891,9 @@ web
 relationship
 ├── cmd
 │   └── server
-│       └── main.go              # 入口，初始化 DB、Rosetta、Echo
+│       └── main.go              # 薄启动器：读参、启动、信号与优雅关闭
 ├── internal
+│   ├── app                      # 装配层：app.go 依赖组装，router.go 路由与静态资源
 │   ├── config
 │   │   └── config.go            # 读取 config.yaml
 │   ├── db
@@ -855,18 +911,15 @@ relationship
 │   │   ├── event_service.go
 │   │   └── ai_service.go        # 调用 Rosetta
 │   ├── ai
-│   │   ├── extractor.go         # 事件提取
-│   │   ├── embedder.go          # embedding 生成
-│   │   ├── trait_updater.go     # 画像更新
-│   │   ├── retriever.go         # 混合检索
-│   │   ├── advice.go            # 建议生成
-│   │   └── prompts.go           # 所有 Prompt 常量
+│   │   └── client.go            # LLM 客户端（OpenAI 兼容协议）
 │   └── handler
 │       ├── person_handler.go
 │       ├── event_handler.go
 │       ├── trait_handler.go
 │       └── ai_handler.go
-├── web                         # 前端（见 §8）
+├── docs
+│   └── architecture             # schema / API / ADR 文档
+├── web                          # 前端（见 §8）
 ├── config.yaml
 ├── go.mod
 └── README.md
@@ -1012,14 +1065,22 @@ func main() {
 
 ## 十三、明确不做的事
 
-- ❌ 不做用户系统  登录  权限
+- ❌ 不做用户系统（登录 / 权限）
 - ❌ 不做数据加密（本地文件，自己电脑）
-- ❌ 不做异步任务队列（同步执行，loading 等待）
-- ❌ 不做 WebSocket  实时推送（SSE 可选用于流式建议）
+- ❌ 不做 WebSocket 实时推送（SSE 可选用于流式建议）
 - ❌ 不做移动端适配（桌面浏览器优先）
-- ❌ 不做数据导入导出（除非后续需要）
 - ❌ 不做 LangChainGo（Rosetta + 自己写编排更简单）
-- ❌ 不做 Docker  K8s（`go build` 单二进制）
+- ❌ 不做 Docker / K8s（`go build` 单二进制）
+
+> 部分边界已按《Loom架构演进与改造计划书》调整：AI 处理将从同步改为进程内任务队列（异步化），数据导出与备份恢复能力正在补齐。详见 `docs/architecture/decisions.md`（ADR-006/007）。
+
+## 十五、架构文档
+
+- `docs/architecture/schema.md` —— 当前数据库 schema（v2–v8 迁移后的真实表结构）
+- `docs/architecture/api.md` —— 当前全部 API 路由（以 `internal/app/router.go` 为准）
+- `docs/architecture/decisions.md` —— 架构决策记录（ADR）
+- `Loom架构演进与改造计划书.md` —— 分阶段改造计划
+- `架构设计与实现对比.md` —— 目标架构与实现的对照分析
 
 ---
 

@@ -62,7 +62,7 @@ func (h *RelationshipHandler) ListTypes(c echo.Context) error {
 // CoAttendance exposes derived "shared experience" pairs. They are computed from
 // records and deliberately not stored as relationship edges.
 func (h *RelationshipHandler) CoAttendance(c echo.Context) error {
-	pairs, err := h.service.CoAttendance(queryInt(c, "limit", 0))
+	pairs, err := h.service.CoAttendance(queryLimit(c, "limit", 0, MaxPageLimit))
 	if err != nil {
 		return respondError(c, err, "LIST_FAILED")
 	}
@@ -115,7 +115,7 @@ func relationshipFilter(c echo.Context, personID string) (models.RelationshipFil
 		PersonID: personID,
 		Type:     c.QueryParam("type"),
 		Query:    c.QueryParam("q"),
-		Limit:    queryInt(c, "limit", 0),
+		Limit:    queryLimit(c, "limit", 0, MaxPageLimit),
 		Offset:   queryInt(c, "offset", 0),
 	}
 	if raw := c.QueryParam("confirmed"); raw != "" {

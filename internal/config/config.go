@@ -9,18 +9,41 @@ import (
 // The json tags matter as much as the yaml ones: Echo binds request bodies through
 // struct tags, so without them PUT /api/config would decode into a zero config.
 type Config struct {
-	Server   ServerConfig   `yaml:"server" json:"server"`
-	Database DatabaseConfig `yaml:"database" json:"database"`
-	LLM      LLMConfig      `yaml:"llm" json:"llm"`
+	Server      ServerConfig      `yaml:"server" json:"server"`
+	Database    DatabaseConfig    `yaml:"database" json:"database"`
+	LLM         LLMConfig         `yaml:"llm" json:"llm"`
+	Backup      BackupConfig      `yaml:"backup" json:"backup"`
+	Maintenance MaintenanceConfig `yaml:"maintenance" json:"maintenance"`
+}
+
+// MaintenanceConfig drives the periodic data-hygiene pass. AuditRetentionDays
+// of 0 keeps audit rows forever — the safe default for security evidence.
+type MaintenanceConfig struct {
+	AuditRetentionDays int `yaml:"audit_retention_days" json:"audit_retention_days"`
 }
 
 type ServerConfig struct {
 	Port int    `yaml:"port" json:"port"`
 	Host string `yaml:"host" json:"host"`
+	// AuthToken optionally guards every /api route. It is never returned to
+	// the frontend; the settings page only learns whether it is set.
+	AuthToken string `yaml:"auth_token" json:"-"`
 }
 
 type DatabaseConfig struct {
 	Path string `yaml:"path" json:"path"`
+}
+
+// BackupConfig drives the scheduled snapshots. Dir is resolved relative to
+// the working directory when relative; Keep is the retention count.
+type BackupConfig struct {
+	Enabled       bool   `yaml:"enabled" json:"enabled"`
+	Dir           string `yaml:"dir" json:"dir"`
+	IntervalHours int    `yaml:"interval_hours" json:"interval_hours"`
+	Keep          int    `yaml:"keep" json:"keep"`
+	// Passphrase encrypts snapshots with AES-256-GCM. It never leaves the
+	// process: lose it and the encrypted backups are unreadable.
+	Passphrase string `yaml:"passphrase" json:"-"`
 }
 
 type LLMConfig struct {
@@ -38,6 +61,16 @@ type LLMConfig struct {
 	// MaxTokens bounds one completion. Leaving it unset lets providers apply their
 	// own small default, which silently truncates long structured answers.
 	MaxTokens int `yaml:"max_tokens" json:"max_tokens"`
+	// AsyncExtract runs the record extraction pipeline in a background queue
+	// instead of blocking POST /api/events. Defaults to true; set false to
+	// restore the old synchronous behaviour (useful for tests and debugging).
+	AsyncExtract bool `yaml:"async_extract" json:"async_extract"`
+	// AllowRemote is the data-boundary kill switch: when false, every model
+	// call to a non-loopback endpoint fails closed. Extraction always sends
+	// the raw record text to the configured endpoint — that is how it works —
+	// so pointing the endpoint at a cloud service means the text leaves the
+	// machine. Defaults to true in config.Load.
+	AllowRemote bool `yaml:"allow_remote" json:"allow_remote"`
 }
 
 // ResolvedMaxTokens is the completion budget sent to chat models.
@@ -76,6 +109,12 @@ func Load(path string) (*Config, error) {
 		Database: DatabaseConfig{
 			Path: "data/relationship.db",
 		},
+		Backup: BackupConfig{
+			Enabled:       true,
+			Dir:           "backups",
+			IntervalHours: 24,
+			Keep:          14,
+		},
 		LLM: LLMConfig{
 			Endpoint:     "http://localhost:11434",
 			Protocol:     "openai",
@@ -84,6 +123,8 @@ func Load(path string) (*Config, error) {
 			EmbedModel:   "nomic-embed-text",
 			EmbedDim:     768,
 			MaxTokens:    8000,
+			AsyncExtract: true,
+			AllowRemote:  true,
 		},
 	}
 

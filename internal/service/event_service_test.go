@@ -53,7 +53,7 @@ func newEventFixture(t *testing.T) *eventFixture {
 
 	return &eventFixture{
 		svc:    NewEventService(eventRepo, vec, persons, traitRepo),
-		ai:     NewAIService(cfg, vec, traitRepo, eventRepo, repository.NewPersonRepo(database), client),
+		ai:     NewAIService(cfg, vec, traitRepo, eventRepo, repository.NewPersonRepo(database), repository.NewRelationshipRepo(database), repository.NewPositionRepo(database), client),
 		events: eventRepo,
 		traits: traitRepo,
 		person: person,

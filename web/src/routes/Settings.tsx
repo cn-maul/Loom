@@ -4,9 +4,9 @@ import { Building2 } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { ErrorNote, Notice, Spinner, controlClass } from '../components/ui';
-import { aiApi, configApi } from '../api/client';
+import { aiApi, authToken, configApi } from '../api/client';
 import { PageHeader } from '../components/layout';
-import type { LLMConfig } from '../api/types';
+import type { LLMConfig, PrivacyInfo } from '../api/types';
 
 type Field = { key: keyof LLMConfig; label: string; hint?: string; type?: string; placeholder?: string };
 
@@ -28,6 +28,7 @@ const EMBED_FIELDS: Field[] = [
 const TABS = [
   { id: 'llm', label: '大语言模型' },
   { id: 'embedding', label: '向量模型' },
+  { id: 'privacy', label: '隐私与安全' },
   { id: 'other', label: '其他设置' },
 ] as const;
 
@@ -55,6 +56,7 @@ function Fields({ items, config, patch }: { items: Field[]; config: LLMConfig; p
 
 export default function Settings() {
   const [config, setConfig] = useState<LLMConfig | null>(null);
+  const [privacy, setPrivacy] = useState<PrivacyInfo | null>(null);
   const [tab, setTab] = useState<Tab>('llm');
   const [saving, setSaving] = useState(false);
   const [reindexing, setReindexing] = useState(false);
@@ -63,11 +65,15 @@ export default function Settings() {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [embedding, setEmbedding] = useState<boolean | null>(null);
+  const [tokenDraft, setTokenDraft] = useState('');
 
   useEffect(() => {
     configApi
       .get()
-      .then((data) => setConfig(data.llm))
+      .then((data) => {
+        setConfig(data.config.llm);
+        setPrivacy(data.privacy);
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
     aiApi
       .embeddingStatus()
@@ -141,7 +147,7 @@ export default function Settings() {
         title="设置"
         description="模型端点、协议与密钥；改完记得保存"
         actions={
-          tab !== 'other' ? (
+          tab === 'llm' || tab === 'embedding' ? (
             <Button onClick={save} disabled={saving}>
               {saving ? '保存中…' : '保存配置'}
             </Button>
@@ -210,6 +216,79 @@ export default function Settings() {
                 <Button onClick={reindex} disabled={reindexing} variant="outline">
                   {reindexing ? '重建中，可能需要几分钟…' : '重建向量索引'}
                 </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {tab === 'privacy' && privacy ? (
+            <div className="space-y-4">
+              <div className="space-y-3 rounded-xl border border-border bg-card p-5 shadow-sm">
+                <h2 className="text-sm font-semibold text-foreground">数据去向</h2>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+                  <dt className="text-muted-foreground">服务监听地址</dt>
+                  <dd className="font-mono text-foreground">{privacy.listens_on}</dd>
+                  <dt className="text-muted-foreground">AI 端点</dt>
+                  <dd className="font-mono text-foreground">
+                    {privacy.ai_endpoint}{' '}
+                    {privacy.ai_endpoint_external ? (
+                      <Badge className="ml-1 border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">外部</Badge>
+                    ) : (
+                      <Badge variant="secondary" className="ml-1">本机</Badge>
+                    )}
+                  </dd>
+                  <dt className="text-muted-foreground">记录原文发送给模型</dt>
+                  <dd className="text-foreground">是（提取功能必然包含原文）</dd>
+                  <dt className="text-muted-foreground">外部端点开关 (allow_remote)</dt>
+                  <dd className="text-foreground">{privacy.allow_remote ? '允许发送到外部端点' : '已关闭：拒绝发送到任何非本机端点'}</dd>
+                  <dt className="text-muted-foreground">API 访问控制</dt>
+                  <dd className="text-foreground">{privacy.auth_required ? '已开启（需要访问令牌）' : '未开启'}</dd>
+                  <dt className="text-muted-foreground">备份加密</dt>
+                  <dd className="text-foreground">{privacy.backup_encrypted ? '已开启（AES-256-GCM）' : '未开启（快照为明文）'}</dd>
+                </dl>
+                <p className="text-xs text-muted-foreground">
+                  该面板是事实陈述：改 allow_remote、auth_token、backup.passphrase 请直接编辑 config.yaml 并重启。
+                </p>
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-border bg-card p-5 shadow-sm">
+                <h2 className="text-sm font-semibold text-foreground">本浏览器访问令牌</h2>
+                <p className="text-sm text-muted-foreground">
+                  {privacy.auth_required
+                    ? '服务器已开启访问控制。把令牌填在这里，它只保存在此浏览器的 localStorage，不会发给设置接口。'
+                    : '服务器未开启访问控制，无需填写。'}
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    value={tokenDraft}
+                    onChange={(e) => setTokenDraft(e.target.value)}
+                    placeholder={authToken.get() ? '已保存令牌，可输入新值覆盖' : '访问令牌'}
+                    className={`${controlClass} max-w-xs`}
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      authToken.set(tokenDraft.trim());
+                      setTokenDraft('');
+                      setMessage(tokenDraft.trim() ? '令牌已保存到本浏览器' : '令牌已清除');
+                    }}
+                    disabled={!tokenDraft.trim() && !authToken.get()}
+                  >
+                    保存
+                  </Button>
+                  {authToken.get() ? (
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        authToken.set('');
+                        setTokenDraft('');
+                        setMessage('令牌已清除');
+                      }}
+                    >
+                      清除
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </div>
           ) : null}

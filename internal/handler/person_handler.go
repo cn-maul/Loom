@@ -48,7 +48,7 @@ func (h *PersonHandler) List(c echo.Context) error {
 		OrgID:    c.QueryParam("org_id"),
 		Relation: c.QueryParam("relation"),
 		Sort:     c.QueryParam("sort"),
-		Limit:    queryInt(c, "limit", 0),
+		Limit:    queryLimit(c, "limit", 0, MaxPageLimit),
 		Offset:   queryInt(c, "offset", 0),
 	})
 	if err != nil {

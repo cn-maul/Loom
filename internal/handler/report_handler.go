@@ -42,7 +42,7 @@ func (h *ReportHandler) Generate(c echo.Context) error {
 
 // List serves the report history. Without person_id it is the all-people view.
 func (h *ReportHandler) List(c echo.Context) error {
-	snapshots, err := h.reports.List(c.QueryParam("person_id"), queryInt(c, "limit", 0), queryInt(c, "offset", 0))
+	snapshots, err := h.reports.List(c.QueryParam("person_id"), queryLimit(c, "limit", 0, MaxPageLimit), queryInt(c, "offset", 0))
 	if err != nil {
 		return respondError(c, err, "LIST_FAILED")
 	}

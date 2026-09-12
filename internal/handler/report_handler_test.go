@@ -53,7 +53,7 @@ func newReportAPI(t *testing.T) *reportFixture {
 	}
 
 	cfg := &config.LLMConfig{Endpoint: "http://127.0.0.1:1", ExtractModel: "test", AdviceModel: "test-model"}
-	aiService := service.NewAIService(cfg, vec, traitRepo, eventRepo, personRepo, ai.NewClient(cfg))
+	aiService := service.NewAIService(cfg, vec, traitRepo, eventRepo, personRepo, repository.NewRelationshipRepo(database), repository.NewPositionRepo(database), ai.NewClient(cfg))
 	reportService := service.NewReportService(
 		reportRepo, eventRepo, followUpRepo,
 		repository.NewRelationshipRepo(database), repository.NewPositionRepo(database),

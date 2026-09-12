@@ -16,7 +16,7 @@ func NewPersonRepo(db *sql.DB) *PersonRepo {
 	return &PersonRepo{db: db}
 }
 
-const personColumns = `id, name, relation, importance, notes, org_id, position, is_self, created_at, updated_at`
+const personColumns = `id, name, relation, importance, notes, org_id, position, gender, is_self, created_at, updated_at`
 
 // nullIfEmpty maps "" to NULL so an emptied affiliation clears the column
 // instead of storing an empty string.
@@ -43,11 +43,11 @@ func (r *PersonRepo) Create(person *models.Person) error {
 		}
 	}
 	query := `
-		INSERT INTO persons (id, name, relation, importance, notes, org_id, position, is_self, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO persons (id, name, relation, importance, notes, org_id, position, gender, is_self, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	if _, err := tx.Exec(query, person.ID, person.Name, person.Relation, person.Importance, person.Notes,
-		nullIfEmpty(person.OrgID), nullIfEmpty(person.Position), person.IsSelf, created, created); err != nil {
+		nullIfEmpty(person.OrgID), nullIfEmpty(person.Position), nullIfEmpty(person.Gender), person.IsSelf, created, created); err != nil {
 		return fmt.Errorf("insert person: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -62,10 +62,10 @@ func (r *PersonRepo) GetByID(id string) (*models.Person, error) {
 	var created, updated string
 	// relation and notes are nullable without a default, so they have to be
 	// scanned through sql.NullString or a row stored with NULL fails to read.
-	var relation, notes, orgID, position sql.NullString
+	var relation, notes, orgID, position, gender sql.NullString
 	err := r.db.QueryRow(`SELECT `+personColumns+` FROM persons WHERE id = ?`, id).Scan(
 		&person.ID, &person.Name, &relation, &person.Importance,
-		&notes, &orgID, &position, &person.IsSelf, &created, &updated,
+		&notes, &orgID, &position, &gender, &person.IsSelf, &created, &updated,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, models.NewError(models.ErrNotFound, "person %s not found", id)
@@ -77,6 +77,7 @@ func (r *PersonRepo) GetByID(id string) (*models.Person, error) {
 	person.Notes = scanNullString(&notes)
 	person.OrgID = scanNullString(&orgID)
 	person.Position = scanNullString(&position)
+	person.Gender = scanNullString(&gender)
 	person.CreatedAt = models.ParseSQLiteTime(created)
 	person.UpdatedAt = models.ParseSQLiteTime(updated)
 	return person, nil
@@ -123,7 +124,7 @@ func (r *PersonRepo) ListFiltered(filter models.PersonFilter) ([]*models.PersonW
 	}
 
 	query := `
-		SELECT p.id, p.name, p.relation, p.importance, p.notes, p.org_id, p.position, p.is_self, p.created_at, p.updated_at,
+		SELECT p.id, p.name, p.relation, p.importance, p.notes, p.org_id, p.position, p.gender, p.is_self, p.created_at, p.updated_at,
 		       o.name AS org_name,
 		       MAX(e.event_date) AS last_event_date, COUNT(DISTINCT e.id) AS event_count
 		FROM persons p
@@ -147,10 +148,10 @@ func (r *PersonRepo) ListFiltered(filter models.PersonFilter) ([]*models.PersonW
 	for rows.Next() {
 		person := &models.PersonWithActivity{}
 		var created, updated string
-		var relation, notes, orgID, position, lastEvent, orgName sql.NullString
+		var relation, notes, orgID, position, gender, lastEvent, orgName sql.NullString
 		if err := rows.Scan(
 			&person.ID, &person.Name, &relation, &person.Importance,
-			&notes, &orgID, &position, &person.IsSelf, &created, &updated,
+			&notes, &orgID, &position, &gender, &person.IsSelf, &created, &updated,
 			&orgName, &lastEvent, &person.EventCount,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan person: %w", err)
@@ -159,6 +160,7 @@ func (r *PersonRepo) ListFiltered(filter models.PersonFilter) ([]*models.PersonW
 		person.Notes = scanNullString(&notes)
 		person.OrgID = scanNullString(&orgID)
 		person.Position = scanNullString(&position)
+		person.Gender = scanNullString(&gender)
 		person.CreatedAt = models.ParseSQLiteTime(created)
 		person.UpdatedAt = models.ParseSQLiteTime(updated)
 		person.LastEventDate = scanNullString(&lastEvent)
@@ -198,11 +200,11 @@ func (r *PersonRepo) Update(person *models.Person) error {
 		}
 	}
 	query := `
-		UPDATE persons SET name = ?, relation = ?, importance = ?, notes = ?, org_id = ?, position = ?, is_self = ?, updated_at = ?
+		UPDATE persons SET name = ?, relation = ?, importance = ?, notes = ?, org_id = ?, position = ?, gender = ?, is_self = ?, updated_at = ?
 		WHERE id = ?
 	`
 	res, err := tx.Exec(query, person.Name, person.Relation, person.Importance, person.Notes,
-		nullIfEmpty(person.OrgID), nullIfEmpty(person.Position), person.IsSelf, updated, person.ID)
+		nullIfEmpty(person.OrgID), nullIfEmpty(person.Position), nullIfEmpty(person.Gender), person.IsSelf, updated, person.ID)
 	if err != nil {
 		return fmt.Errorf("update person: %w", err)
 	}

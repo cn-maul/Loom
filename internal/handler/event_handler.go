@@ -14,16 +14,22 @@ import (
 type EventHandler struct {
 	eventService *service.EventService
 	aiService    *service.AIService
+	ingest       *service.IngestService
 }
 
-func NewEventHandler(eventService *service.EventService, aiService *service.AIService) *EventHandler {
-	return &EventHandler{eventService: eventService, aiService: aiService}
+func NewEventHandler(eventService *service.EventService, aiService *service.AIService, ingest *service.IngestService) *EventHandler {
+	return &EventHandler{eventService: eventService, aiService: aiService, ingest: ingest}
 }
 
 // Create records a raw note and runs the AI pipeline over it. The pipeline reports
 // partial success rather than failing the record, so the user's text is never lost.
 // The record may name several participants; it is stored once and appears on every
 // attendee's timeline.
+//
+// In async mode (default) the record is stored and returned immediately with
+// extraction_status='pending' and report.async=true; extraction, indexing and the
+// profile refresh run in the background queue. Sync mode blocks until the
+// pipeline finishes, as before.
 func (h *EventHandler) Create(c echo.Context) error {
 	var event models.Event
 	if err := bindJSON(c, &event); err != nil {
@@ -33,12 +39,12 @@ func (h *EventHandler) Create(c echo.Context) error {
 	if err := event.Validate(); err != nil {
 		return respondError(c, err, "INVALID_INPUT")
 	}
-	// Fail before the LLM round-trips when any participant does not exist.
+	// Fail before any LLM work when a participant does not exist.
 	if err := h.eventService.EnsurePeopleExist(event.Participants); err != nil {
 		return respondError(c, err, "PERSON_NOT_FOUND")
 	}
 
-	report, err := h.aiService.IngestEvent(c.Request().Context(), &event)
+	report, err := h.ingest.Create(&event)
 	if err != nil {
 		return respondError(c, err, "CREATE_FAILED")
 	}
@@ -55,11 +61,12 @@ func (h *EventHandler) Create(c echo.Context) error {
 func (h *EventHandler) List(c echo.Context) error {
 	events, total, err := h.eventService.List(models.EventFilter{
 		PersonID: c.QueryParam("person_id"),
+		OrgID:    c.QueryParam("org_id"),
 		From:     c.QueryParam("from"),
 		To:       c.QueryParam("to"),
 		Query:    c.QueryParam("q"),
 		Status:   c.QueryParam("status"),
-		Limit:    queryInt(c, "limit", 0),
+		Limit:    queryLimit(c, "limit", 0, MaxPageLimit),
 		Offset:   queryInt(c, "offset", 0),
 	})
 	if err != nil {
@@ -99,7 +106,7 @@ func (h *EventHandler) Update(c echo.Context) error {
 }
 
 func (h *EventHandler) ListByPerson(c echo.Context) error {
-	events, err := h.eventService.ListByPerson(c.Param("id"), queryInt(c, "limit", 50))
+	events, err := h.eventService.ListByPerson(c.Param("id"), queryLimit(c, "limit", 50, MaxPageLimit))
 	if err != nil {
 		return respondError(c, err, "LIST_FAILED")
 	}

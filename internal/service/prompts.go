@@ -30,16 +30,20 @@ const traitPrompt = `你是人物画像分析助手。基于以下历史事件�
 - 最多输出 5 条
 - 没有任何可靠画像时输出 {"traits":[]}`
 
-// Four-argument template: traits, person background, the stated goal, evidence
-// events. The user's question is the user message itself, so it is not repeated
-// in the system prompt. Every conclusion asks for its own evidence list so the
-// interface can open the source of a line, or say plainly that it has none.
+// Five-argument template: traits, person background, structured relations and
+// postings, the stated goal, evidence events. The user's question is the user
+// message itself, so it is not repeated in the system prompt. Every conclusion
+// asks for its own evidence list so the interface can open the source of a line,
+// or say plainly that it has none.
 const advicePrompt = `你是沟通顾问。基于以下事实，为用户提供沟通建议。
 
 人物画像：
 %s
 
 人物背景（用户手写的备注，只能作为辅助参考，不要编造）：
+%s
+
+关系与组织背景（用户显式标注的关系边与当前任职，是结构化事实，请据此理解双方立场与层级，但不要凭空补全未标注的关系）：
 %s
 
 用户本次想要达成的目标：

@@ -100,7 +100,7 @@ func newAdviceFixture(t *testing.T, initVec bool, embedBody string) *adviceFixtu
 		t.Fatal(err)
 	}
 
-	aiService := NewAIService(cfg, vec, traitRepo, eventRepo, personRepo, ai.NewClient(cfg))
+	aiService := NewAIService(cfg, vec, traitRepo, eventRepo, personRepo, repository.NewRelationshipRepo(database), repository.NewPositionRepo(database), ai.NewClient(cfg))
 	return &adviceFixture{
 		svc:       NewAdviceService(adviceRepo, eventRepo, followUpRepo, persons, aiService),
 		advice:    adviceRepo,

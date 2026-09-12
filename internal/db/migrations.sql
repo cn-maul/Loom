@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS persons (
     notes TEXT,
     org_id TEXT REFERENCES organizations(id) ON DELETE SET NULL,
     position TEXT,
+    gender TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );

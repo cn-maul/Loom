@@ -38,9 +38,7 @@ function FollowUpList({ items }: { items: ReportFollowUpRef[] }) {
           <Link to={`/persons/${item.person_id}`} className="font-medium text-primary hover:underline">
             {item.person_name || '未知人物'}
           </Link>
-          <Link to="/follow-ups" state={{ personId: item.person_id }} className="text-foreground hover:text-primary hover:underline">
-            {item.title}
-          </Link>
+          <span className="text-foreground">{item.title}</span>
           {item.days_overdue > 0 ? <Badge variant="destructive">逾期 {item.days_overdue} 天</Badge> : null}
           {item.due_date ? <span className="text-xs text-muted-foreground">{item.due_date} 到期</span> : null}
           {!item.due_date && item.due_text ? <span className="text-xs text-muted-foreground">{item.due_text}</span> : null}

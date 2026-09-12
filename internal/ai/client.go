@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -45,7 +48,9 @@ func NewClient(cfg *config.LLMConfig) *Client {
 		// The configured gateway answers max_tokens, not the newer
 		// max_completion_tokens; pinning skips one failed probe per client.
 		rosetta.WithMaxTokensField("max_tokens"),
-		rosetta.WithLogger(slog.Default()),
+		// The SDK logs request payloads at debug level; those payloads carry
+		// relationship text. Only warnings and errors may reach the log.
+		rosetta.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))),
 	}
 	if cfg.Protocol == "anthropic" {
 		opts = append(opts, rosetta.WithProtocol(rosetta.ProtoAnthropic))
@@ -86,6 +91,9 @@ type ChatOptions struct {
 // (transport errors, 408/429/5xx) are retried once: chat calls have no
 // server-side side effects beyond the request itself.
 func (c *Client) Chat(ctx context.Context, model string, messages []Message, opts ChatOptions) (string, error) {
+	if err := c.checkBoundary(c.cfg.Endpoint); err != nil {
+		return "", err
+	}
 	if c.llmErr != nil {
 		return "", fmt.Errorf("llm client unavailable: %w", c.llmErr)
 	}
@@ -171,6 +179,9 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("no embedding endpoint configured")
 	}
+	if err := c.checkBoundary(endpoint); err != nil {
+		return nil, err
+	}
 	req := embedRequest{Model: c.cfg.EmbedModel, Input: text, Dimensions: c.cfg.EmbedDim}
 
 	var resp struct {
@@ -248,6 +259,37 @@ func sleepIfRetry(ctx context.Context, attempt, seconds int) {
 		case <-ctx.Done():
 		}
 	}
+}
+
+// checkBoundary enforces llm.allow_remote: the kill switch that keeps record
+// text on this machine. Extraction embeds the raw record in every prompt, so
+// a non-loopback endpoint IS the data leaving the machine — when the switch
+// is off, that call fails closed instead of silently leaking.
+func (c *Client) checkBoundary(endpoint string) error {
+	if c.cfg.AllowRemote || IsLoopbackEndpoint(endpoint) {
+		return nil
+	}
+	return fmt.Errorf("数据边界：llm.allow_remote 为 false，已拒绝把记录内容发送到外部端点 %s；"+
+		"如确认要发送，请在 config.yaml 中将 allow_remote 改为 true，或改用本地模型", endpoint)
+}
+
+// IsLoopbackEndpoint reports whether the endpoint host is this machine.
+func IsLoopbackEndpoint(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func apiURL(endpoint, path string) string {
