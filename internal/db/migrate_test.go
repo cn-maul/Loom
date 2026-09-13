@@ -113,7 +113,7 @@ func TestMigrateCreatesStructuredSchema(t *testing.T) {
 	versions := migrateVersions(t, database)
 	// Pinned to the exact list on purpose: an accidental extra migration shows
 	// up here instead of silently applying to user databases.
-	want := []int{2, 3, 4, 5, 6, 7, 8, 9}
+	want := []int{2, 3, 4, 5, 6, 7, 8, 9, 10}
 	if len(versions) != len(want) {
 		t.Fatalf("schema_migrations = %v, want %v", versions, want)
 	}
@@ -132,7 +132,7 @@ func TestMigrateIsRepeatable(t *testing.T) {
 			t.Fatalf("Migrate run %d: %v", run, err)
 		}
 	}
-	if versions := migrateVersions(t, database); len(versions) != 8 {
+	if versions := migrateVersions(t, database); len(versions) != 9 {
 		t.Fatalf("schema_migrations grew on repeat runs: %v", versions)
 	}
 }

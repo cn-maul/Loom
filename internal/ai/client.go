@@ -66,6 +66,31 @@ func NewClient(cfg *config.LLMConfig) *Client {
 	}
 }
 
+// ListModels fetches the endpoint's model catalog (rosetta probes the
+// OpenAI-compatible /models list) and returns bare model ids. It builds a
+// throwaway client from the *current* config, so the settings page can change
+// endpoint/key and immediately list what that new endpoint serves.
+func (c *Client) ListModels(ctx context.Context) ([]string, error) {
+	if err := c.checkBoundary(c.cfg.Endpoint); err != nil {
+		return nil, err
+	}
+	fresh := NewClient(c.cfg)
+	if fresh.llmErr != nil {
+		return nil, fmt.Errorf("llm client unavailable: %w", fresh.llmErr)
+	}
+	infos, err := fresh.llm.ListModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(infos))
+	for _, info := range infos {
+		if info.ID != "" {
+			ids = append(ids, info.ID)
+		}
+	}
+	return ids, nil
+}
+
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`

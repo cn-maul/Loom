@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { graphApi, relationshipApi } from '../api/client';
+import { graphApi, aiApi, relationshipApi } from '../api/client';
 import type { GraphCoLink, GraphData, GraphEdge, GraphNode, GraphOrg, Relationship } from '../api/types';
 import { ErrorNote, Notice, Spinner, controlClass } from '../components/ui';
 import { Button } from '../components/ui/button';
@@ -124,6 +124,8 @@ export default function Relationships() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [inferring, setInferring] = useState(false);
+  const [inferNotice, setInferNotice] = useState('');
 
   // 筛选
   const [typeFilter, setTypeFilter] = useState('');
@@ -155,6 +157,30 @@ export default function Relationships() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // AI 按职位推断上下级：筛了组织就只推该组织，否则扫描全部。
+  // 新边一律未确认，模型只补充、不覆盖已有关系。
+  const inferHierarchy = async () => {
+    if (!orgFilter && graph && graph.orgs.length > 1) {
+      if (!window.confirm(`将对 ${graph.orgs.length} 个组织的在职成员各跑一次 AI 推断（每个组织一次模型调用）。继续？`)) return;
+    }
+    setInferring(true);
+    setError('');
+    setInferNotice('');
+    try {
+      const result = await aiApi.inferHierarchy(orgFilter || undefined);
+      setInferNotice(
+        result.created > 0
+          ? `AI 新推断出 ${result.created} 条上下级关系，均为「待确认」状态，请在图谱中核对后确认或删除。`
+          : '没有发现可新增的上下级关系（已存在的关系不会重复创建，拿不准的 AI 会跳过）。',
+      );
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setInferring(false);
+    }
+  };
 
   const nodes = graph?.nodes ?? [];
   const orgs = graph?.orgs ?? [];
@@ -488,20 +514,30 @@ export default function Relationships() {
     <div>
       <PageHeader
         title="关系图谱"
-        description="人物与组织的连线：关系要手动记录，共同经历只作参考，不会自动推断成关系"
+        description="人物与组织的连线：关系可手动记录，也可按职位让 AI 推断上下级（推断结果待确认）；共同经历只作参考"
         actions={
-          <Button
-            variant="outline"
-            onClick={() => {
-              // 从选中的person节点发起新关系，省一次下拉选择。
-              setForm({ ...EMPTY_FORM, from_person_id: selNodeId && isPerson(selNodeId) ? selNodeId : '' });
-              setSelEdgeId('');
-            }}
-          >
-            添加关系
-          </Button>
+          <>
+            <Button variant="outline" onClick={() => void inferHierarchy()} disabled={inferring} title="按各组织在职成员的职位，让 AI 推断直接上下级">
+              {inferring ? '推断中，可能需要几十秒…' : 'AI 推断上下级'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                // 从选中的person节点发起新关系，省一次下拉选择。
+                setForm({ ...EMPTY_FORM, from_person_id: selNodeId && isPerson(selNodeId) ? selNodeId : '' });
+                setSelEdgeId('');
+              }}
+            >
+              添加关系
+            </Button>
+          </>
         }
       />
+      {inferNotice ? (
+        <div className="mb-4">
+          <Notice>{inferNotice}</Notice>
+        </div>
+      ) : null}
       {error ? (
         <div className="mb-4">
           <ErrorNote>{error}</ErrorNote>

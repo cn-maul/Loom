@@ -9,6 +9,10 @@ const STATUS_META: Record<string, { label: string; className: string }> = {
     label: '已提取',
     className: 'border-emerald-300/60 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-950/40 dark:text-emerald-300',
   },
+  succeeded_with_warnings: {
+    label: '已提取 · 有警告',
+    className: 'border-amber-300/60 bg-amber-50 text-amber-700 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-300',
+  },
   pending: {
     label: '待提取',
     className: 'border-border bg-muted text-muted-foreground',
@@ -26,12 +30,18 @@ export function statusLabel(status: string): string {
 export function EventStatusBadge({ event, className }: { event: Event; className?: string }) {
   const status = event.extraction_status || 'pending';
   const meta = STATUS_META[status] ?? STATUS_META.pending;
+  // "Succeeded with warnings" is not the same as a clean success: indexing or
+  // profile refresh may have been skipped, and the user deserves to see that.
+  const warn = status === 'succeeded' && event.pipeline_warnings.length > 0;
+  const warnMeta = STATUS_META['succeeded_with_warnings'];
+  const shown = warn ? warnMeta : meta;
+  const tip = warn ? event.pipeline_warnings.join('\n') : event.extraction_error;
   return (
     <span
-      className={cn('shrink-0 rounded-full border px-2 py-0.5 text-xs', meta.className, className)}
-      title={event.extraction_error || undefined}
+      className={cn('shrink-0 rounded-full border px-2 py-0.5 text-xs', shown.className, className)}
+      title={tip || undefined}
     >
-      {event.manually_edited === 1 ? `${meta.label} · 已人工修订` : meta.label}
+      {event.manually_edited === 1 ? `${shown.label} · 已人工修订` : shown.label}
     </span>
   );
 }

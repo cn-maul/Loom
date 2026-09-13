@@ -148,6 +148,8 @@ export interface Event {
   extraction_status: string;
   extraction_error: string;
   extracted_at?: string;
+  /** Non-fatal pipeline complaints (skipped indexing, failed profile refresh). */
+  pipeline_warnings: string[];
   /** 1 when a human curated the stored result; a retry then needs force. */
   manually_edited: number;
   edited_at?: string;

@@ -276,6 +276,17 @@ var schemaMigrations = []migration{
 			`CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC)`,
 		},
 	},
+	{
+		version: 10,
+		name:    "record pipeline warnings",
+		// "Succeeded" used to hide partial work: a record whose vector indexing
+		// or profile refresh failed looked identical to a fully processed one.
+		// The warnings now ride on the row, so the list can show "succeeded
+		// with warnings" instead of lying by omission.
+		steps: []string{
+			`ALTER TABLE events ADD COLUMN pipeline_warnings TEXT`,
+		},
+	},
 }
 
 // runMigrations applies the baseline schema, the legacy column additions and every

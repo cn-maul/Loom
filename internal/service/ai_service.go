@@ -49,6 +49,13 @@ func NewAIService(
 	}
 }
 
+// ListModels fetches the chat endpoint's model catalog for the settings page.
+// A fresh client is built per call so the just-saved endpoint/key is what gets
+// probed, not the one the process started with.
+func (s *AIService) ListModels(ctx context.Context) ([]string, error) {
+	return ai.NewClient(s.cfg).ListModels(ctx)
+}
+
 // IngestEvent runs the record pipeline: extract, persist, embed, refresh the person
 // profile. A failing LLM never discards the user's record — the event is still stored
 // and the shortfall comes back as a warning, recorded on the row so the UI can offer
@@ -96,6 +103,12 @@ func (s *AIService) IngestEvent(ctx context.Context, event *models.Event) (model
 		report.Warnings = append(report.Warnings, fmt.Sprintf("画像更新失败：%v", err))
 	}
 	report.TraitsUpdated = updated
+
+	// "Succeeded with warnings" must be visible from the list, not only in the
+	// ephemeral response: the warnings ride on the row.
+	if err := s.eventRepo.SetPipelineWarnings(event.ID, report.Warnings); err != nil {
+		report.Warnings = append(report.Warnings, fmt.Sprintf("警告未写入记录：%v", err))
+	}
 
 	return report, nil
 }
@@ -189,6 +202,10 @@ func (s *AIService) RetryExtraction(ctx context.Context, eventID string, force b
 	refreshed, err := s.eventRepo.GetByID(eventID)
 	if err != nil {
 		return nil, report, err
+	}
+	// Same honesty rule as the inline pipeline: warnings outlive the response.
+	if err := s.eventRepo.SetPipelineWarnings(eventID, report.Warnings); err != nil {
+		report.Warnings = append(report.Warnings, fmt.Sprintf("警告未写入记录：%v", err))
 	}
 	return refreshed, report, nil
 }
@@ -339,6 +356,126 @@ func (s *AIService) indexTrait(ctx context.Context, trait *models.Trait) error {
 		return err
 	}
 	return s.vecRepo.Insert(traitVectorID(trait.ID), embedding, trait.PersonID, "trait", trait.ID)
+}
+
+// hierarchyPair is one proposed superior→subordinate edge from the model.
+type hierarchyPair struct {
+	Superior    string `json:"superior"`
+	Subordinate string `json:"subordinate"`
+	Reason      string `json:"reason"`
+}
+
+const hierarchyPrompt = `你在为个人关系管理系统推断组织内的上下级关系。下面是一个组织的在职成员与职位。请根据职位名称推断直接上下级对：
+- 只输出有把握的直接上下级（如 主任→干事、经理→专员），拿不准的不要输出；
+- 不要输出同级之间的边，也不要在完全没有职位线索时硬凑；
+- superior 是上级姓名，subordinate 是下级姓名，必须使用列表中的原名，不要改写；
+- 只返回 JSON：{"pairs":[{"superior":"...","subordinate":"...","reason":"一句话理由"}]}，没有就返回 {"pairs":[]}。
+
+成员列表：
+%s`
+
+// InferHierarchy asks the model to propose direct superior/subordinate edges
+// from each organisation's current postings, then stores them as unconfirmed
+// 上级 edges. Existing open edges between a pair (any type, either direction)
+// are never duplicated or overridden: inference supplements, it does not
+// overwrite facts the user recorded by hand. An empty orgID scans every
+// organisation with at least two current members.
+func (s *AIService) InferHierarchy(ctx context.Context, orgID string) ([]*models.RelationshipLink, error) {
+	positions, err := s.posRepo.ListAll()
+	if err != nil {
+		return nil, fmt.Errorf("list positions: %w", err)
+	}
+	type member struct{ id, name, role string }
+	rosters := map[string][]member{}
+	orgNames := map[string]string{}
+	for _, p := range positions {
+		if p.EndDate != "" {
+			continue
+		}
+		if orgID != "" && p.OrgID != orgID {
+			continue
+		}
+		rosters[p.OrgID] = append(rosters[p.OrgID], member{id: p.PersonID, name: p.PersonName, role: p.Role})
+		orgNames[p.OrgID] = p.OrgName
+	}
+
+	created := []*models.RelationshipLink{}
+	for id, members := range rosters {
+		if len(members) < 2 {
+			continue
+		}
+		lines := make([]string, 0, len(members))
+		idsByName := map[string][]string{}
+		for _, m := range members {
+			lines = append(lines, fmt.Sprintf("%s（%s）", m.name, m.role))
+			idsByName[m.name] = append(idsByName[m.name], m.id)
+		}
+
+		resp, err := s.client.Chat(ctx, s.cfg.ExtractModel, []ai.Message{
+			ai.System(fmt.Sprintf(hierarchyPrompt, joinOr(lines, "\n"))),
+			ai.User("请推断这个组织的上下级关系"),
+		}, ai.ChatOptions{JSONMode: true, Temperature: 0.2, MaxTokens: 1500})
+		if err != nil {
+			log.Printf("warning: infer hierarchy for %s: %v", orgNames[id], err)
+			continue
+		}
+		var payload struct {
+			Pairs []hierarchyPair `json:"pairs"`
+		}
+		if err := parseJSON(resp, &payload); err != nil {
+			log.Printf("warning: parse hierarchy pairs for %s: %v (%s)", orgNames[id], err, truncate(resp, 200))
+			continue
+		}
+
+		for _, pair := range payload.Pairs {
+			fromIDs, fromOK := idsByName[strings.TrimSpace(pair.Superior)]
+			toIDs, toOK := idsByName[strings.TrimSpace(pair.Subordinate)]
+			// 重名时不猜：同名成员无法确定指谁，宁可漏掉也不建错边。
+			if !fromOK || !toOK || len(fromIDs) > 1 || len(toIDs) > 1 || fromIDs[0] == toIDs[0] {
+				continue
+			}
+			if s.activeEdgeExists(fromIDs[0], toIDs[0]) {
+				continue
+			}
+			rel := &models.Relationship{
+				FromPersonID: fromIDs[0],
+				ToPersonID:   toIDs[0],
+				RelationType: "上级",
+				Direction:    models.DirectionDirected,
+				Confirmed:    0,
+				Notes:        fmt.Sprintf("AI 按职位推断（%s）：%s", orgNames[id], pair.Reason),
+			}
+			if err := rel.Validate(); err != nil {
+				continue
+			}
+			rel.ID = uuid.New().String()
+			if err := s.relRepo.Create(rel); err != nil {
+				log.Printf("warning: create inferred relationship: %v", err)
+				continue
+			}
+			if link, err := s.relRepo.GetByID(rel.ID); err == nil {
+				created = append(created, link)
+			}
+		}
+	}
+	return created, nil
+}
+
+// activeEdgeExists reports whether the two people already share an open edge in
+// either direction, of any type. On a query error it returns true: a flaky read
+// must never turn into duplicate edges.
+func (s *AIService) activeEdgeExists(a, b string) bool {
+	active := true
+	existing, err := s.relRepo.List(models.RelationshipFilter{PersonID: a, Active: &active, Limit: 200})
+	if err != nil {
+		return true
+	}
+	for _, link := range existing {
+		if link.FromPersonID == b || link.ToPersonID == b {
+			return true
+		}
+	}
+	return false
 }
 
 // structureContext renders a person's structured relations and current

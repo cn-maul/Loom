@@ -10,14 +10,6 @@ import type { LLMConfig, PrivacyInfo } from '../api/types';
 
 type Field = { key: keyof LLMConfig; label: string; hint?: string; type?: string; placeholder?: string };
 
-const LLM_FIELDS: Field[] = [
-  { key: 'endpoint', label: '对话 API 地址', placeholder: 'https://api.openai.com/v1 或 http://localhost:11434' },
-  { key: 'api_key', label: '对话 API Key', hint: '本地 Ollama 留空', type: 'password' },
-  { key: 'extract_model', label: '事件提取模型', hint: '记录时抽取摘要、情绪、承诺，建议用快的模型' },
-  { key: 'advice_model', label: '建议/周报模型', hint: '负责推理和长文，建议用更强的模型' },
-  { key: 'max_tokens', label: '单次补全 token 上限', type: 'number', hint: '太小会让长建议 JSON 被截断' },
-];
-
 const EMBED_FIELDS: Field[] = [
   { key: 'embed_endpoint', label: 'Embedding API 地址', hint: '留空则沿用上面的对话 API 地址' },
   { key: 'embed_api_key', label: 'Embedding API Key', hint: '留空则沿用上面的 API Key', type: 'password' },
@@ -66,6 +58,8 @@ export default function Settings() {
   const [error, setError] = useState('');
   const [embedding, setEmbedding] = useState<boolean | null>(null);
   const [tokenDraft, setTokenDraft] = useState('');
+  const [modelIds, setModelIds] = useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
 
   useEffect(() => {
     configApi
@@ -85,8 +79,8 @@ export default function Settings() {
     setConfig((current) => (current ? ({ ...current, [key]: value } as LLMConfig) : current));
   };
 
-  const save = async () => {
-    if (!config) return;
+  const save = async (): Promise<boolean> => {
+    if (!config) return false;
     setSaving(true);
     setMessage('');
     setNotice('');
@@ -96,10 +90,34 @@ export default function Settings() {
       setConfig(result.config.llm);
       setMessage('配置已保存，立即生效');
       if (result.reindex_required) setNotice('Embedding 配置变了，已有向量索引不再匹配，请点「重建向量索引」。');
+      return true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // 先落库再探测：后端按刚保存的端点/Key 去请求 /models，拿到目录后
+  // 两个模型输入框出现下拉建议，但仍然允许手输任意模型 id。
+  const fetchModels = async () => {
+    setFetchingModels(true);
+    setMessage('');
+    setError('');
+    try {
+      if (!(await save())) return;
+      const ids = await aiApi.models();
+      setModelIds(ids);
+      setMessage(
+        ids.length > 0
+          ? `获取到 ${ids.length} 个模型：点击模型输入框可从下拉选择，也可以直接输入`
+          : '端点返回了空模型列表，仍可直接输入模型 id',
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setSaving(false);
+      setFetchingModels(false);
     }
   };
 
@@ -177,18 +195,88 @@ export default function Settings() {
         <section className="min-w-0 flex-1 space-y-4">
           {tab === 'llm' ? (
             <div className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-              <label className="block text-sm text-muted-foreground">
-                协议
-                <select
-                  value={config.protocol}
-                  onChange={(e) => patch('protocol', e.target.value)}
-                  className={`${controlClass} mt-1 text-foreground`}
-                >
-                  <option value="openai">OpenAI 兼容</option>
-                  <option value="anthropic">Anthropic</option>
-                </select>
-              </label>
-              <Fields items={LLM_FIELDS} config={config} patch={patch} />
+              {/* 第一行：协议（窄下拉）+ 对话 API 地址 */}
+              <div className="grid grid-cols-[9rem_minmax(0,1fr)] gap-3">
+                <label className="block text-sm text-muted-foreground">
+                  协议
+                  <select
+                    value={config.protocol}
+                    onChange={(e) => patch('protocol', e.target.value)}
+                    className={`${controlClass} mt-1 text-foreground`}
+                  >
+                    <option value="openai">OpenAI 兼容</option>
+                    <option value="anthropic">Anthropic</option>
+                  </select>
+                </label>
+                <label className="block text-sm text-muted-foreground">
+                  对话 API 地址
+                  <input
+                    value={String(config.endpoint ?? '')}
+                    onChange={(e) => patch('endpoint', e.target.value)}
+                    placeholder="https://api.openai.com/v1 或 http://localhost:11434"
+                    className={`${controlClass} mt-1`}
+                  />
+                  <span className="mt-1 block text-xs text-muted-foreground/70">本地 Ollama / LM Studio 填本机地址</span>
+                </label>
+              </div>
+
+              {/* 第二行：API Key + 补全 token 上限 */}
+              <div className="grid grid-cols-[minmax(0,1fr)_11rem] gap-3">
+                <label className="block text-sm text-muted-foreground">
+                  对话 API Key
+                  <input
+                    type="password"
+                    value={String(config.api_key ?? '')}
+                    onChange={(e) => patch('api_key', e.target.value)}
+                    className={`${controlClass} mt-1`}
+                  />
+                  <span className="mt-1 block text-xs text-muted-foreground/70">本地 Ollama 留空</span>
+                </label>
+                <label className="block text-sm text-muted-foreground">
+                  单次补全 token 上限
+                  <input
+                    type="number"
+                    value={String(config.max_tokens ?? '')}
+                    onChange={(e) => patch('max_tokens', Number(e.target.value) || 0)}
+                    className={`${controlClass} mt-1`}
+                  />
+                  <span className="mt-1 block text-xs text-muted-foreground/70">太小会截断长建议 JSON</span>
+                </label>
+              </div>
+
+              {/* 第三行：两个模型 + 获取模型按钮 */}
+              <div className="flex items-end gap-3">
+                <label className="block min-w-0 flex-1 text-sm text-muted-foreground">
+                  事件提取模型
+                  <input
+                    list="llm-model-list"
+                    value={String(config.extract_model ?? '')}
+                    onChange={(e) => patch('extract_model', e.target.value)}
+                    placeholder="输入或从下拉选择"
+                    className={`${controlClass} mt-1`}
+                  />
+                  <span className="mt-1 block text-xs text-muted-foreground/70">抽取摘要、情绪、承诺，建议用快的模型</span>
+                </label>
+                <label className="block min-w-0 flex-1 text-sm text-muted-foreground">
+                  建议/周报模型
+                  <input
+                    list="llm-model-list"
+                    value={String(config.advice_model ?? '')}
+                    onChange={(e) => patch('advice_model', e.target.value)}
+                    placeholder="输入或从下拉选择"
+                    className={`${controlClass} mt-1`}
+                  />
+                  <span className="mt-1 block text-xs text-muted-foreground/70">负责推理和长文，建议用更强的模型</span>
+                </label>
+                <Button variant="outline" onClick={() => void fetchModels()} disabled={fetchingModels} className="mb-6 shrink-0">
+                  {fetchingModels ? '获取中…' : '获取模型'}
+                </Button>
+              </div>
+              <datalist id="llm-model-list">
+                {modelIds.map((id) => (
+                  <option key={id} value={id} />
+                ))}
+              </datalist>
             </div>
           ) : null}
 

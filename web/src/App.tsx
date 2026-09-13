@@ -185,12 +185,7 @@ function Shell() {
             <kbd className="ml-auto hidden rounded border border-border bg-background px-1.5 py-0.5 text-[11px] sm:inline">Ctrl K</kbd>
           </button>
 
-          {/* Writing a record is the one action worth reaching from anywhere. */}
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setRecordOpen(true)} title="记一笔（从任意页面）">
-              <NotebookPen className="size-3.5" />
-              记一笔
-            </Button>
             <Button variant="ghost" size="icon" onClick={toggle} aria-label="切换主题" title="切换主题">
               {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
             </Button>

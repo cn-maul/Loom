@@ -11,6 +11,7 @@ DELETE /api/reports/:id
 GET /api/advice
 GET /api/advice/:id
 GET /api/ai/embeddings/status
+GET /api/ai/models
 GET /api/audit
 GET /api/backups
 GET /api/backups/status
@@ -44,6 +45,7 @@ GET /api/reports/:id
 GET /api/tasks
 POST /api/advice
 POST /api/advice/:id/adopt
+POST /api/ai/infer-hierarchy
 POST /api/ai/reindex
 POST /api/backups
 POST /api/backups/restore

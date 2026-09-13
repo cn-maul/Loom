@@ -217,6 +217,11 @@ type Event struct {
 	ExtractionStatus string     `json:"extraction_status"`
 	ExtractionError  string     `json:"extraction_error"`
 	ExtractedAt      *time.Time `json:"extracted_at,omitempty"`
+	// PipelineWarnings keeps the non-fatal pipeline complaints (skipped vector
+	// indexing, failed profile refresh) from the last run, so "succeeded" can
+	// be shown honestly as "succeeded with warnings" instead of hiding them.
+	// Stored as a JSON array, exposed the same way promises are.
+	PipelineWarnings string `json:"-"`
 	// ManuallyEdited marks a record whose stored extraction was written by a
 	// human. A retry must not overwrite that without an explicit force.
 	ManuallyEdited int        `json:"manually_edited"`
@@ -245,6 +250,13 @@ func (e Event) MarshalJSON() ([]byte, error) {
 	if participants == nil {
 		participants = []EventParticipant{}
 	}
+	var warnings []string
+	if e.PipelineWarnings != "" {
+		_ = json.Unmarshal([]byte(e.PipelineWarnings), &warnings)
+	}
+	if warnings == nil {
+		warnings = []string{}
+	}
 	return json.Marshal(struct {
 		ID               string             `json:"id"`
 		PersonID         string             `json:"person_id"`
@@ -263,10 +275,11 @@ func (e Event) MarshalJSON() ([]byte, error) {
 		ManuallyEdited   int                `json:"manually_edited"`
 		EditedAt         *time.Time         `json:"edited_at,omitempty"`
 		Participants     []EventParticipant `json:"participants"`
+		PipelineWarnings []string           `json:"pipeline_warnings"`
 	}{e.ID, e.PersonID, e.RawText, e.EventDate, e.Summary, e.RecordType, e.Channel,
 		e.MyFeeling, e.TheirReaction, promises, e.CreatedAt,
 		e.ExtractionStatus, e.ExtractionError, e.ExtractedAt, e.ManuallyEdited, e.EditedAt,
-		participants})
+		participants, warnings})
 }
 
 // UnmarshalJSON accepts promises both as an array and as the string form.

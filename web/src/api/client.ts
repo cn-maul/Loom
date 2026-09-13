@@ -242,6 +242,15 @@ export const traitApi = {
 export const aiApi = {
   reindex: () => request<ReindexResult>('/ai/reindex', { method: 'POST' }),
   embeddingStatus: () => request<{ available: boolean }>('/ai/embeddings/status'),
+  // 端点的 /models 目录（后端经 rosetta 探测）。请求前应先保存配置。
+  models: () => request<string[]>('/ai/models'),
+  // 按职位推断上下级：生成 confirmed=0 的「上级」边，不覆盖已有关系。
+  // orgId 省略时扫描全部组织。
+  inferHierarchy: (orgId?: string) =>
+    request<{ created: number; links: RelationshipLink[] }>('/ai/infer-hierarchy', {
+      method: 'POST',
+      body: JSON.stringify(orgId ? { org_id: orgId } : {}),
+    }),
 };
 
 // Reports are snapshots: generating stores one, and the history serves every

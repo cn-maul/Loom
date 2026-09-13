@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -33,7 +34,12 @@ func (h *ReportHandler) Generate(c echo.Context) error {
 		return badRequest(c, "INVALID_INPUT", err.Error())
 	}
 
-	report, err := h.reports.Generate(c.Request().Context(), req)
+	// Generation is detached from the request lifecycle: a user who navigates
+	// away (or closes the tab) mid-generation must not abort the LLM call and
+	// persist a "context canceled" failure. The snapshot lands in the database
+	// either way; only the HTTP response is lost, and the client re-reads it
+	// from the history on the next visit.
+	report, err := h.reports.Generate(context.WithoutCancel(c.Request().Context()), req)
 	if err != nil {
 		return respondError(c, err, "REPORT_FAILED")
 	}

@@ -37,3 +37,4 @@ Thumbs.db
 # Local database backups and session scratch (never public)
 /backups/
 /gh_*.json
+*.exe~

@@ -72,7 +72,10 @@ DELETE /api/positions/:id                       删除
 GET    /api/persons/:id/traits                  画像列表
 PUT    /api/traits/:id/verify                   标记准确/不准确
 POST   /api/ai/reindex                          重建向量索引
+POST   /api/ai/infer-hierarchy                  按职位 AI 推断上下级（body {org_id} 可选；生成 confirmed=0 的「上级」边，
+                                                不覆盖已存在的有效关系；返回 {created, links}）
 GET    /api/ai/embeddings/status                向量索引状态
+GET    /api/ai/models                           对话端点的模型目录（string[]，经 rosetta 探测 /models，用当前已保存配置）
 GET    /api/tasks                               提取队列近期任务 + 队列统计（{tasks, stats}，
                                                 stats 含 enqueued/succeeded/failed/当前深度/耗时）
 GET    /api/config                              配置 + privacy 面板（{config, privacy}）

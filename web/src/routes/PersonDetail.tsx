@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useSyncExternalStore, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Building2, MessageSquareText, NotebookPen, X } from 'lucide-react';
 import EventTimeline from '../components/EventTimeline';
@@ -8,6 +8,7 @@ import { ErrorNote, Spinner } from '../components/ui';
 import { Button } from '../components/ui/button';
 import { Textarea } from '../components/ui/textarea';
 import { organizationApi, personApi, reportApi } from '../api/client';
+import { getPortraitState, startPortrait, subscribePortrait } from '../lib/portraitStore';
 import { Avatar, EmptyState, SectionCard } from '../components/layout';
 import type { Event, Organization, Person, Trait } from '../api/types';
 import { fullDate, shortDate, todayISO } from '../format';
@@ -40,7 +41,13 @@ export default function PersonDetail() {
 
   // The AI profile paragraph: latest snapshot if one exists, generated on demand.
   const [profile, setProfile] = useState<ProfileSnapshot | null>(null);
-  const [profileBusy, setProfileBusy] = useState(false);
+  // In-flight/finished generation lives in a module-level store: leaving the
+  // page mid-generation keeps it running, and coming back picks it up here.
+  const portrait = useSyncExternalStore(
+    useCallback((cb: () => void) => subscribePortrait(id, cb), [id]),
+    () => getPortraitState(id),
+  );
+  const profileBusy = portrait.status === 'running';
 
   // Popup surfaces: recording a moment and asking the AI about this person.
   const [recordOpen, setRecordOpen] = useState(false);
@@ -111,28 +118,13 @@ export default function PersonDetail() {
   }, [recordOpen, askOpen]);
 
   // The profile window is the last 30 days: "近期" with enough depth to show a
-  // pattern rather than one meeting.
-  const generateProfile = async () => {
+  // pattern rather than one meeting. Handing off to the store means the request
+  // is not owned by this component instance and survives navigation.
+  const generateProfile = () => {
     if (!person || profileBusy) return;
-    setProfileBusy(true);
-    setActionError('');
-    try {
-      const end = todayISO();
-      const start = localDate(new Date(Date.now() - 29 * 24 * 60 * 60 * 1000));
-      const report = await reportApi.generate({ person_id: person.id, start, end });
-      setProfile({
-        summary: report.summary,
-        status: report.status,
-        failure_reason: report.failure_reason,
-        start: report.start,
-        end: report.end,
-        generated_at: report.generated_at,
-      });
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setProfileBusy(false);
-    }
+    const end = todayISO();
+    const start = localDate(new Date(Date.now() - 29 * 24 * 60 * 60 * 1000));
+    startPortrait(person.id, { person_id: person.id, start, end });
   };
 
   const removePerson = async () => {
@@ -226,7 +218,18 @@ export default function PersonDetail() {
             }
           >
             {profileBusy ? (
-              <Spinner label="AI 正在汇总近 30 天的记录…" />
+              <Spinner label="AI 正在汇总近 30 天的记录…（离开此页生成也会继续）" />
+            ) : portrait.status === 'error' ? (
+              <p className="text-sm text-muted-foreground">上次生成失败：{portrait.message}，可重试。</p>
+            ) : portrait.status === 'done' && portrait.snapshot.status === 'failed' ? (
+              <p className="text-sm text-muted-foreground">上次生成失败：{portrait.snapshot.failure_reason || '未知原因'}，可重试。</p>
+            ) : portrait.status === 'done' ? (
+              <>
+                <p className="text-sm leading-7 text-foreground">{portrait.snapshot.summary}</p>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  统计窗口 {portrait.snapshot.start} ~ {portrait.snapshot.end} · 生成于 {fullDate(portrait.snapshot.generated_at)}
+                </p>
+              </>
             ) : profile && profile.status === 'succeeded' && profile.summary ? (
               <>
                 <p className="text-sm leading-7 text-foreground">{profile.summary}</p>

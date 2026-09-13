@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,7 +18,7 @@ func NewEventRepo(db *sql.DB) *EventRepo {
 	return &EventRepo{db: db}
 }
 
-const eventColumns = `id, person_id, raw_text, event_date, summary, my_feeling, their_reaction, promises, record_type, channel, created_at, extraction_status, extraction_error, extracted_at, manually_edited, edited_at`
+const eventColumns = `id, person_id, raw_text, event_date, summary, my_feeling, their_reaction, promises, record_type, channel, created_at, extraction_status, extraction_error, extracted_at, manually_edited, edited_at, pipeline_warnings`
 
 // Create stores the record and its attendance list in one transaction: a record
 // saved with participants but no attendance rows would be invisible from everyone
@@ -65,11 +66,12 @@ func (r *EventRepo) Create(event *models.Event) error {
 func scanEvent(row rowScanner) (*models.Event, error) {
 	event := &models.Event{}
 	var personID, summary, feeling, reaction, promises, recordType, channel, created sql.NullString
-	var extractionStatus, extractionError, extractedAt, editedAt sql.NullString
+	var extractionStatus, extractionError, extractedAt, editedAt, pipelineWarnings sql.NullString
 	if err := row.Scan(
 		&event.ID, &personID, &event.RawText, &event.EventDate,
 		&summary, &feeling, &reaction, &promises, &recordType, &channel, &created,
 		&extractionStatus, &extractionError, &extractedAt, &event.ManuallyEdited, &editedAt,
+		&pipelineWarnings,
 	); err != nil {
 		return nil, err
 	}
@@ -90,6 +92,7 @@ func scanEvent(row rowScanner) (*models.Event, error) {
 	event.ExtractionError = scanNullString(&extractionError)
 	event.ExtractedAt = timePointer(scanNullString(&extractedAt))
 	event.EditedAt = timePointer(scanNullString(&editedAt))
+	event.PipelineWarnings = scanNullString(&pipelineWarnings)
 	return event, nil
 }
 
@@ -269,7 +272,8 @@ func (r *EventRepo) UpdateExtraction(event *models.Event) error {
 	now, t := models.NowUTC()
 	res, err := r.db.Exec(`
 		UPDATE events SET summary = ?, my_feeling = ?, their_reaction = ?, promises = ?,
-			extraction_status = ?, extraction_error = NULL, extracted_at = ?, manually_edited = 0
+			extraction_status = ?, extraction_error = NULL, extracted_at = ?, manually_edited = 0,
+			pipeline_warnings = NULL
 		WHERE id = ?`,
 		event.Summary, event.MyFeeling, event.TheirReaction, event.Promises,
 		models.ExtractionSucceeded, now, event.ID)
@@ -292,10 +296,30 @@ func (r *EventRepo) UpdateExtraction(event *models.Event) error {
 func (r *EventRepo) RecordExtractionFailure(id, message string) error {
 	now, _ := models.NowUTC()
 	res, err := r.db.Exec(`
-		UPDATE events SET extraction_status = ?, extraction_error = ?, extracted_at = ?
+		UPDATE events SET extraction_status = ?, extraction_error = ?, extracted_at = ?,
+			pipeline_warnings = NULL
 		WHERE id = ?`, models.ExtractionFailed, message, now, id)
 	if err != nil {
 		return fmt.Errorf("record extraction failure: %w", err)
+	}
+	return requireRow(res, "event", id)
+}
+
+// SetPipelineWarnings persists the non-fatal complaints of the last pipeline
+// run (skipped indexing, failed profile refresh) so the list can show
+// "succeeded with warnings" honestly. An empty slice clears them.
+func (r *EventRepo) SetPipelineWarnings(id string, warnings []string) error {
+	encoded := ""
+	if len(warnings) > 0 {
+		data, err := json.Marshal(warnings)
+		if err != nil {
+			return fmt.Errorf("encode pipeline warnings: %w", err)
+		}
+		encoded = string(data)
+	}
+	res, err := r.db.Exec(`UPDATE events SET pipeline_warnings = ? WHERE id = ?`, nullIfEmpty(encoded), id)
+	if err != nil {
+		return fmt.Errorf("set pipeline warnings: %w", err)
 	}
 	return requireRow(res, "event", id)
 }

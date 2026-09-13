@@ -223,7 +223,7 @@ export default function Events() {
                   <th className="w-40 px-3 py-2.5 font-medium">参与人</th>
                   <th className="px-3 py-2.5 font-medium">摘要</th>
                   <th className="px-3 py-2.5 font-medium">原文</th>
-                  <th className="w-16 px-3 py-2.5 font-medium">AI处理</th>
+                  <th className="w-24 px-3 py-2.5 font-medium">AI处理</th>
                   <th className="w-24 px-4 py-2.5 text-right font-medium">操作</th>
                 </tr>
               </thead>
@@ -231,10 +231,12 @@ export default function Events() {
                 {events.map((event) => {
                   const status =
                     event.extraction_status === 'succeeded'
-                      ? { label: '已处理', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' }
+                      ? event.pipeline_warnings.length > 0
+                        ? { label: '已处理·有警告', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400', tip: event.pipeline_warnings.join('\n') }
+                        : { label: '已处理', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400', tip: '' }
                       : event.extraction_status === 'failed'
-                        ? { label: '失败', cls: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400' }
-                        : { label: '待处理', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400' };
+                        ? { label: '失败', cls: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400', tip: event.extraction_error }
+                        : { label: '待处理', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400', tip: '' };
                   return (
                     <tr key={event.id} className="border-b border-border/60 transition-colors last:border-0 hover:bg-muted/50">
                       <td className="whitespace-nowrap px-4 py-3 tabular-nums text-muted-foreground">
@@ -263,7 +265,7 @@ export default function Events() {
                         </div>
                       </td>
                       <td className="px-3 py-3">
-                        <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${status.cls}`} title={event.extraction_error}>
+                        <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${status.cls}`} title={status.tip || undefined}>
                           {status.label}
                         </span>
                       </td>

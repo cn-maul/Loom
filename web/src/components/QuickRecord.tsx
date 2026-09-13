@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { eventApi, organizationApi, personApi } from '../api/client';
 import type { Event, IngestReport, Organization, PersonWithActivity } from '../api/types';
@@ -36,6 +36,9 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
   const [pickerOrg, setPickerOrg] = useState('');
   const [pickerPerson, setPickerPerson] = useState('');
   const [picked, setPicked] = useState<Picked[]>([]);
+  // Names are inserted straight into the textarea at the caret, so we need the
+  // element to read/restore the selection around each insertion.
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (!participantPicker) return;
@@ -94,10 +97,27 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
       (pickerOrg === 'none' ? !p.org_id : pickerOrg ? p.org_id === pickerOrg : false),
   );
 
+  /** Put the person's name into the textarea at the caret so the user writes
+   *  the record around it, and track them for the structured participant link. */
   const addPicked = () => {
     const person = persons.find((p) => p.id === pickerPerson);
     if (!person) return;
-    setPicked((current) => [...current, { person_id: person.id, person_name: person.name, org_name: person.org_name || '' }]);
+    setPicked((current) =>
+      current.some((x) => x.person_id === person.id) ? current : [...current, { person_id: person.id, person_name: person.name, org_name: person.org_name || '' }],
+    );
+    const el = textareaRef.current;
+    const caret = el ? (el.selectionStart ?? text.length) : text.length;
+    const before = text.slice(0, caret);
+    const after = text.slice(el ? (el.selectionEnd ?? caret) : caret);
+    // Keep the name from gluing onto surrounding words.
+    const gapBefore = before && !/[\s，。；、：:"'（）]/.test(before.slice(-1)) ? ' ' : '';
+    const gapAfter = after && !/^[\s，。；、："'（）]/.test(after) ? ' ' : '';
+    setText(`${before}${gapBefore}${person.name}${gapAfter}${after}`);
+    const nextCaret = (before + gapBefore + person.name + gapAfter).length;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(nextCaret, nextCaret);
+    });
     setPickerPerson('');
   };
 
@@ -125,6 +145,7 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
       )}
 
       <Textarea
+        ref={textareaRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
@@ -137,17 +158,14 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
 
       {participantPicker ? (
         <div className="mt-3 rounded-lg border border-dashed border-border p-3">
-          <p className="mb-2 text-xs leading-5 text-muted-foreground">
-            共同参与的人（可选）：选中的人物会关联到这条记录，AI 会把它理解为一次双方互动，而不是随口提到谁。
-          </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex items-center gap-2">
             <select
               value={pickerOrg}
               onChange={(e) => {
                 setPickerOrg(e.target.value);
                 setPickerPerson('');
               }}
-              className={`${controlClass} h-8 w-40 text-xs`}
+              className={`${controlClass} h-8 min-w-0 flex-[2] text-xs`}
               aria-label="选择组织"
             >
               <option value="">选择组织…</option>
@@ -161,7 +179,7 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
             <select
               value={pickerPerson}
               onChange={(e) => setPickerPerson(e.target.value)}
-              className={`${controlClass} h-8 w-40 text-xs`}
+              className={`${controlClass} h-8 min-w-0 flex-[2] text-xs`}
               aria-label="选择人名"
               disabled={!pickerOrg}
             >
@@ -172,19 +190,16 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
                 </option>
               ))}
             </select>
-            <Button size="sm" variant="outline" onClick={addPicked} disabled={!pickerPerson}>
+            <Button size="sm" variant="outline" className="min-w-0 flex-[1]" onClick={addPicked} disabled={!pickerPerson}>
               添加
             </Button>
           </div>
           {picked.length > 0 ? (
-            <ul className="mt-2 flex flex-wrap gap-1.5">
-              {picked.map((p) => (
-                <li
-                  key={p.person_id}
-                  className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs text-foreground"
-                >
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+              <span>已添加：</span>
+              {picked.map((p, i) => (
+                <span key={p.person_id} className="inline-flex items-center gap-0.5 whitespace-nowrap">
                   {p.person_name}
-                  {p.org_name ? <span className="text-muted-foreground">（{p.org_name}）</span> : null}
                   <button
                     onClick={() => setPicked((current) => current.filter((x) => x.person_id !== p.person_id))}
                     aria-label={`移除${p.person_name}`}
@@ -192,9 +207,10 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
                   >
                     <X className="size-3" />
                   </button>
-                </li>
+                  {i < picked.length - 1 ? '、' : null}
+                </span>
               ))}
-            </ul>
+            </div>
           ) : null}
         </div>
       ) : null}

@@ -105,6 +105,8 @@ func (a *App) registerAPI(e *echo.Echo) {
 	api.PUT("/traits/:id/verify", a.traitHandler.Verify)
 	api.POST("/ai/reindex", a.aiHandler.Reindex)
 	api.GET("/ai/embeddings/status", a.aiHandler.EmbeddingStatus)
+	api.GET("/ai/models", a.aiHandler.ListModels)
+	api.POST("/ai/infer-hierarchy", a.aiHandler.InferHierarchy)
 	api.GET("/tasks", a.tasksHandler.List)
 	api.GET("/config", a.configHandler.Get)
 	api.PUT("/config", a.configHandler.Update)
