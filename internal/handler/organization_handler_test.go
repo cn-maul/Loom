@@ -47,7 +47,6 @@ func organizationAPI(t *testing.T) *echo.Echo {
 	api := e.Group("/api")
 	api.POST("/organizations", h.Create)
 	api.GET("/organizations", h.List)
-	api.GET("/organizations/:id", h.GetByID)
 	api.PUT("/organizations/:id", h.Update)
 	api.POST("/organizations/:id/archive", h.Archive)
 	api.POST("/organizations/:id/restore", h.Restore)

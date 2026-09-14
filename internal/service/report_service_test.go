@@ -73,7 +73,7 @@ func newReportFixture(t *testing.T, chatOK bool) *reportFixture {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/embeddings" {
-			_, _ = w.Write([]byte(`{"data":[{"embedding":[1,0,0,0]}]}`))
+			_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[1,0,0,0]}]}`))
 			return
 		}
 		body, _ := io.ReadAll(r.Body)

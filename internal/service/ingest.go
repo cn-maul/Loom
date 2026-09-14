@@ -75,31 +75,6 @@ func (s *IngestService) RecoverPending() (int, error) {
 	return len(events), nil
 }
 
-// TaskFor reports the latest queue task for an event, if any.
-func (s *IngestService) TaskFor(eventID string) *tasks.Task {
-	if s.queue == nil {
-		return nil
-	}
-	return s.queue.Get(eventID)
-}
-
-// RecentTasks lists queue history for observability.
-func (s *IngestService) RecentTasks(limit int) []*tasks.Task {
-	if s.queue == nil {
-		return []*tasks.Task{}
-	}
-	return s.queue.Snapshot(limit)
-}
-
-// Stats reports queue health: counters, current depth and run latency.
-// Sync mode has no queue; the zero value with Async=false is the honest answer.
-func (s *IngestService) Stats() tasks.Stats {
-	if s.queue == nil {
-		return tasks.Stats{}
-	}
-	return s.queue.Stats()
-}
-
 // Stop shuts the queue down: the in-flight extraction is cancelled, queued
 // work is dropped, and the pending rows it leaves behind are what the next
 // startup's RecoverPending picks up.

@@ -68,14 +68,6 @@ func (h *PositionHandler) Create(c echo.Context) error {
 	return c.JSON(http.StatusCreated, models.APIResponse{OK: true, Data: link})
 }
 
-func (h *PositionHandler) Get(c echo.Context) error {
-	link, err := h.service.GetByID(c.Param("id"))
-	if err != nil {
-		return respondError(c, err, "READ_FAILED")
-	}
-	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: link})
-}
-
 func (h *PositionHandler) Update(c echo.Context) error {
 	var pos models.OrgPosition
 	if err := bindJSON(c, &pos); err != nil {

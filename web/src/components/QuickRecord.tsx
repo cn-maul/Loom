@@ -68,7 +68,11 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
         try {
           await eventApi.setParticipants(
             result.event.id,
-            picked.map((p) => ({ person_id: p.person_id })),
+            // The anchor person attends too and leads the list. The backend
+            // re-points the primary person to the first participant whenever
+            // they are missing from the list, so omitting them here would move
+            // the record off this person's timeline.
+            [{ person_id: personId }, ...picked.map((p) => ({ person_id: p.person_id }))],
           );
         } catch (e) {
           result.report.warnings = [

@@ -444,6 +444,9 @@ export interface LLMConfig {
   embed_api_key: string;
   embed_model: string;
   embed_dim: number;
+  rerank_endpoint?: string;
+  rerank_api_key?: string;
+  rerank_model?: string;
   max_tokens: number;
 }
 
@@ -499,38 +502,4 @@ export interface APIResponse<T> {
     code: string;
     message: string;
   };
-}
-
-
-/** GET /api/dashboard/stats 的落地页聚合。 */
-export interface DashboardPersonRef {
-  id: string;
-  name: string;
-  relation?: string;
-  org_name?: string;
-  gender?: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface DashboardEventRef {
-  id: string;
-  person_name?: string;
-  event_date: string;
-  summary?: string;
-  created_at?: string;
-}
-
-export interface DashboardStats {
-  persons_total: number;
-  orgs_total: number;
-  events_total: number;
-  traits_total: number;
-  relationships_total: number;
-  open_follow_ups: number;
-  overdue_follow_ups: number;
-  latest_person: DashboardPersonRef | null;
-  latest_trait_person: DashboardPersonRef | null;
-  latest_event: DashboardEventRef | null;
-  recent_persons: DashboardPersonRef[];
 }

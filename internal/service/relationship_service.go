@@ -54,10 +54,6 @@ func (s *RelationshipService) Create(rel *models.Relationship) (*models.Relation
 	return s.repo.GetByID(rel.ID)
 }
 
-func (s *RelationshipService) GetByID(id string) (*models.RelationshipLink, error) {
-	return s.repo.GetByID(id)
-}
-
 func (s *RelationshipService) List(filter models.RelationshipFilter) ([]*models.RelationshipLink, error) {
 	filter.Limit, filter.Offset = normalizePage(filter.Limit, filter.Offset)
 	return s.repo.List(filter)
@@ -91,15 +87,6 @@ func (s *RelationshipService) Delete(id string) error {
 // ListTypes backs the type picker on the graph page.
 func (s *RelationshipService) ListTypes() ([]string, error) {
 	return s.repo.ListTypes()
-}
-
-// CoAttendance backs the "shared experience" links on the graph. These are
-// derived from records and are explicitly not relationship edges.
-func (s *RelationshipService) CoAttendance(limit int) ([]*models.CoAttendance, error) {
-	if limit <= 0 || limit > maxPageSize {
-		limit = defaultPageSize
-	}
-	return s.repo.ListCoAttendance(limit)
 }
 
 func (s *RelationshipService) ensureEndpoints(rel *models.Relationship) error {

@@ -123,35 +123,6 @@ func TestRelationshipRepoMissingRowIsNotFound(t *testing.T) {
 	}
 }
 
-// Shared experience is derived from attendance, never stored as a typed edge.
-func TestRelationshipRepoCoAttendance(t *testing.T) {
-	database := newStructureDB(t)
-	repo := NewRelationshipRepo(database)
-	for _, statement := range []string{
-		`INSERT INTO events (id, person_id, raw_text, event_date) VALUES ('e1', 'p1', 'a', '2026-09-01')`,
-		`INSERT INTO events (id, person_id, raw_text, event_date) VALUES ('e2', 'p1', 'b', '2026-09-02')`,
-		`INSERT INTO events (id, person_id, raw_text, event_date) VALUES ('e3', 'p2', 'c', '2026-09-03')`,
-		`INSERT INTO event_participants (event_id, person_id) VALUES ('e1', 'p1'), ('e1', 'p2')`,
-		`INSERT INTO event_participants (event_id, person_id) VALUES ('e2', 'p1'), ('e2', 'p2'), ('e2', 'p3')`,
-		`INSERT INTO event_participants (event_id, person_id) VALUES ('e3', 'p1'), ('e3', 'p2')`,
-	} {
-		if _, err := database.Exec(statement); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	pairs, err := repo.ListCoAttendance(10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pairs) != 3 {
-		t.Fatalf("want 3 pairs, got %d (%+v)", len(pairs), pairs)
-	}
-	if pairs[0].PersonAName != "张总" || pairs[0].PersonBName != "李工" || pairs[0].SharedEvents != 3 {
-		t.Fatalf("most-frequent pair = %+v, want 张总/李工 x3", pairs[0])
-	}
-}
-
 func TestPositionRepoCurrentAndHistory(t *testing.T) {
 	database := newStructureDB(t)
 	repo := NewPositionRepo(database)

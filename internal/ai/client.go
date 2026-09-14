@@ -1,18 +1,15 @@
 package ai
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cn-maul/rosetta"
@@ -20,18 +17,39 @@ import (
 	"relationship/internal/config"
 )
 
-// Client speaks to chat providers through the unified rosetta SDK. Embeddings
-// stay on a plain OpenAI-compatible /embeddings call: rosetta has no embed
-// endpoint, and the Qwen3-Embedding-8B endpoint used here is one.
+// Client speaks to chat, embeddings and model listings through the unified
+// rosetta SDK (v0.4.0 added the embeddings path). It holds two SDK clients:
+// the main one for chat and embeddings, and a dedicated rerank client whose
+// aux override points at the resolved rerank endpoint — rerank may live on a
+// different provider than embeddings (Cohere-format POST /rerank), so it
+// cannot simply share the embedding endpoint override.
+//
+// The settings page rewrites the shared LLMConfig in place, and the SDK bakes
+// endpoint, protocol and keys into its client at construction — so both
+// clients are rebuilt lazily whenever those settings change (see current).
 type Client struct {
-	cfg    *config.LLMConfig
-	llm    *rosetta.Client
-	llmErr error
-	// client backs the embeddings path only.
-	client *http.Client
+	cfg *config.LLMConfig
+
+	mu        sync.Mutex
+	llm       *rosetta.Client // chat + embeddings
+	rerankLLM *rosetta.Client // rerank only
+	llmErr    error
+	built     clientSettings
 }
 
-func NewClient(cfg *config.LLMConfig) *Client {
+// clientSettings is the subset of LLMConfig the rosetta clients capture at
+// construction. Everything else (model ids, max tokens) is read per call.
+type clientSettings struct {
+	endpoint       string
+	protocol       string
+	apiKey         string
+	embedEndpoint  string
+	embedAPIKey    string
+	rerankEndpoint string
+	rerankAPIKey   string
+}
+
+func clientSettingsFrom(cfg *config.LLMConfig) clientSettings {
 	// A local endpoint (Ollama, LM Studio) needs no credential, but the chat
 	// library refuses to build a client with an empty one. A placeholder keeps
 	// the out-of-the-box setup working instead of failing every call before it
@@ -40,45 +58,121 @@ func NewClient(cfg *config.LLMConfig) *Client {
 	if apiKey == "" {
 		apiKey = "local"
 	}
-	opts := []rosetta.Option{
-		rosetta.WithEndpoint(cfg.Endpoint),
-		rosetta.WithAPIKey(apiKey),
-		// Advice generation on a reasoning model can take well over a minute.
-		rosetta.WithTimeout(5 * time.Minute),
-		// The configured gateway answers max_tokens, not the newer
-		// max_completion_tokens; pinning skips one failed probe per client.
-		rosetta.WithMaxTokensField("max_tokens"),
-		// The SDK logs request payloads at debug level; those payloads carry
-		// relationship text. Only warnings and errors may reach the log.
-		rosetta.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))),
-	}
-	if cfg.Protocol == "anthropic" {
-		opts = append(opts, rosetta.WithProtocol(rosetta.ProtoAnthropic))
-	} else {
-		opts = append(opts, rosetta.WithProtocol(rosetta.ProtoOpenAIChat))
-	}
-	llm, err := rosetta.NewClient(opts...)
-	return &Client{
-		cfg:    cfg,
-		llm:    llm,
-		llmErr: err,
-		client: &http.Client{Timeout: 5 * time.Minute},
+	return clientSettings{
+		endpoint:       cfg.Endpoint,
+		protocol:       cfg.Protocol,
+		apiKey:         apiKey,
+		embedEndpoint:  cfg.EmbedEndpoint,
+		embedAPIKey:    cfg.EmbedAPIKey,
+		rerankEndpoint: cfg.RerankEndpoint,
+		rerankAPIKey:   cfg.RerankAPIKey,
 	}
 }
 
+func NewClient(cfg *config.LLMConfig) *Client {
+	c := &Client{cfg: cfg}
+	c.current()
+	return c
+}
+
+// current returns the main and rerank rosetta clients for the live config,
+// rebuilding them when endpoint/protocol/key settings changed since the last
+// build. Model names and token budgets travel per request, so saving config
+// applies immediately.
+func (c *Client) current() (llm *rosetta.Client, rerank *rosetta.Client, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	snap := clientSettingsFrom(c.cfg)
+	if c.llm != nil && snap == c.built {
+		return c.llm, c.rerankLLM, c.llmErr
+	}
+
+	baseOpts := func() []rosetta.Option {
+		opts := []rosetta.Option{
+			rosetta.WithEndpoint(snap.endpoint),
+			rosetta.WithAPIKey(snap.apiKey),
+			// Advice generation on a reasoning model can take well over a minute.
+			rosetta.WithTimeout(5 * time.Minute),
+			// The configured gateway answers max_tokens, not the newer
+			// max_completion_tokens; pinning skips one failed probe per client.
+			rosetta.WithMaxTokensField("max_tokens"),
+			// The SDK logs request payloads at debug level; those payloads carry
+			// relationship text. Only warnings and errors may reach the log.
+			rosetta.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))),
+		}
+		if snap.protocol == "anthropic" {
+			opts = append(opts, rosetta.WithProtocol(rosetta.ProtoAnthropic))
+		} else {
+			opts = append(opts, rosetta.WithProtocol(rosetta.ProtoOpenAIChat))
+		}
+		return opts
+	}
+
+	// Main client: chat and embeddings. A dedicated embedding service (endpoint
+	// or key differing from chat) rides rosetta's aux override; when unset,
+	// rosetta falls back to the main endpoint and key — the same resolution
+	// ResolvedEmbedEndpoint does.
+	mainOpts := baseOpts()
+	if snap.embedEndpoint != "" {
+		mainOpts = append(mainOpts, rosetta.WithEmbeddingEndpoint(snap.embedEndpoint))
+	}
+	if snap.embedAPIKey != "" {
+		mainOpts = append(mainOpts, rosetta.WithEmbeddingAPIKey(snap.embedAPIKey))
+	}
+
+	// Rerank client: a dedicated SDK client whose aux override points at the
+	// resolved rerank endpoint (rerank → embedding → chat), so rerank can live
+	// on a different provider than embeddings. The resolved endpoint and key
+	// are always pinned, never inherited.
+	rerankEndpoint := snap.rerankEndpoint
+	if rerankEndpoint == "" {
+		rerankEndpoint = snap.embedEndpoint
+	}
+	if rerankEndpoint == "" {
+		rerankEndpoint = snap.endpoint
+	}
+	rerankKey := snap.rerankAPIKey
+	if rerankKey == "" {
+		rerankKey = snap.embedAPIKey
+	}
+	if rerankKey == "" {
+		rerankKey = snap.apiKey
+	}
+	rerankOpts := append(baseOpts(),
+		rosetta.WithAPIKey(rerankKey),
+		rosetta.WithEmbeddingEndpoint(rerankEndpoint),
+	)
+	if snap.rerankAPIKey != "" {
+		rerankOpts = append(rerankOpts, rosetta.WithEmbeddingAPIKey(snap.rerankAPIKey))
+	}
+
+	llm, err = rosetta.NewClient(mainOpts...)
+	if err != nil {
+		c.llm, c.rerankLLM, c.llmErr, c.built = nil, nil, err, snap
+		return nil, nil, err
+	}
+	rerank, err = rosetta.NewClient(rerankOpts...)
+	if err != nil {
+		c.llm, c.rerankLLM, c.llmErr, c.built = llm, nil, err, snap
+		return llm, nil, err
+	}
+	c.llm, c.rerankLLM, c.llmErr, c.built = llm, rerank, nil, snap
+	return llm, rerank, nil
+}
+
 // ListModels fetches the endpoint's model catalog (rosetta probes the
-// OpenAI-compatible /models list) and returns bare model ids. It builds a
-// throwaway client from the *current* config, so the settings page can change
-// endpoint/key and immediately list what that new endpoint serves.
+// OpenAI-compatible /models list) and returns bare model ids. current() builds
+// against the *current* config, so the settings page can change endpoint/key,
+// save, and immediately list what that new endpoint serves.
 func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	if err := c.checkBoundary(c.cfg.Endpoint); err != nil {
 		return nil, err
 	}
-	fresh := NewClient(c.cfg)
-	if fresh.llmErr != nil {
-		return nil, fmt.Errorf("llm client unavailable: %w", fresh.llmErr)
+	llm, _, llmErr := c.current()
+	if llmErr != nil {
+		return nil, fmt.Errorf("llm client unavailable: %w", llmErr)
 	}
-	infos, err := fresh.llm.ListModels(ctx)
+	infos, err := llm.ListModels(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -119,13 +213,14 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message, opt
 	if err := c.checkBoundary(c.cfg.Endpoint); err != nil {
 		return "", err
 	}
-	if c.llmErr != nil {
-		return "", fmt.Errorf("llm client unavailable: %w", c.llmErr)
+	llm, _, llmErr := c.current()
+	if llmErr != nil {
+		return "", fmt.Errorf("llm client unavailable: %w", llmErr)
 	}
 
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		resp, err := c.llm.Chat(ctx, c.buildRequest(model, messages, opts))
+		resp, err := llm.Chat(ctx, c.buildRequest(model, messages, opts))
 		if err == nil {
 			if resp.StopReason == rosetta.StopLength {
 				return "", fmt.Errorf("回答被 max_tokens=%d 截断，可在配置中调大", c.resolveMaxTokens(opts))
@@ -193,12 +288,11 @@ func retryableLLMErr(err error) bool {
 	return errors.As(err, &trErr)
 }
 
-type embedRequest struct {
-	Model      string `json:"model"`
-	Input      string `json:"input"`
-	Dimensions int    `json:"dimensions,omitempty"`
-}
-
+// Embed computes one embedding vector. The call rides rosetta's aux path
+// (OpenAI-compatible POST /embeddings against the embedding override endpoint,
+// else the main one); rosetta validates the reply shape, including the
+// dimensionality against the requested Dimensions, and retries transient
+// failures internally — no outer retry here.
 func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	endpoint := c.cfg.ResolvedEmbedEndpoint()
 	if endpoint == "" {
@@ -207,74 +301,56 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	if err := c.checkBoundary(endpoint); err != nil {
 		return nil, err
 	}
-	req := embedRequest{Model: c.cfg.EmbedModel, Input: text, Dimensions: c.cfg.EmbedDim}
+	llm, _, llmErr := c.current()
+	if llmErr != nil {
+		return nil, fmt.Errorf("llm client unavailable: %w", llmErr)
+	}
 
-	var resp struct {
-		Data []struct {
-			Embedding []float32 `json:"embedding"`
-		} `json:"data"`
+	req := &rosetta.EmbeddingRequest{
+		Model:      c.cfg.EmbedModel,
+		Input:      []string{text},
+		Dimensions: c.cfg.EmbedDim,
 	}
-	if err := c.post(ctx, endpoint, c.cfg.ResolvedEmbedAPIKey(), "embeddings", req, &resp); err != nil {
-		return nil, err
-	}
-	if len(resp.Data) == 0 || len(resp.Data[0].Embedding) == 0 {
-		return nil, fmt.Errorf("no embeddings in response")
-	}
-	if c.cfg.EmbedDim > 0 && len(resp.Data[0].Embedding) != c.cfg.EmbedDim {
-		return nil, fmt.Errorf("embedding dim mismatch: model returned %d, config expects %d", len(resp.Data[0].Embedding), c.cfg.EmbedDim)
+	resp, err := llm.Embed(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("embed: %w", err)
 	}
 	return resp.Data[0].Embedding, nil
 }
 
-// post sends payload to {endpoint}/v1/embeddings. Endpoints are commonly
-// written with or without the /v1 suffix, so join them without doubling it.
-//
-// Transport errors, 429s and 5xx are transient for embedding calls, so each
-// is retried once after a short pause; 4xx responses are caller errors and
-// pass through.
-func (c *Client) post(ctx context.Context, endpoint, apiKey, path string, payload, out interface{}) error {
-	url := apiURL(endpoint, path)
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
+// Rerank scores documents against the query, most relevant first, and returns
+// their original indexes in that order. The call rides rosetta's aux path
+// (Cohere-format POST /rerank against the embedding endpoint override, else
+// the main one). It sends the document texts — record content — to the
+// endpoint, so the allow_remote boundary applies here exactly as to Embed.
+// rosetta retries transient failures internally; no outer retry here.
+func (c *Client) Rerank(ctx context.Context, query string, documents []string, topN int) ([]int, error) {
+	if len(documents) == 0 {
+		return nil, nil
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+	if err := c.checkBoundary(c.cfg.ResolvedRerankEndpoint()); err != nil {
+		return nil, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	_, rerankLLM, llmErr := c.current()
+	if llmErr != nil {
+		return nil, fmt.Errorf("llm client unavailable: %w", llmErr)
 	}
 
-	var attemptErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		resp, err := c.client.Do(httpReq)
-		if err != nil {
-			attemptErr = fmt.Errorf("%s request failed: %w", path, err)
-			sleepIfRetry(ctx, attempt, 1)
-			continue
-		}
-		data, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
-			attemptErr = fmt.Errorf("%s returned %s: %s", path, resp.Status, truncate(string(data), 400))
-			sleepIfRetry(ctx, attempt, 1)
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("%s returned %s: %s", path, resp.Status, truncate(string(data), 400))
-		}
-		if readErr != nil {
-			return fmt.Errorf("read response: %w", readErr)
-		}
-		if err := json.Unmarshal(data, out); err != nil {
-			return fmt.Errorf("unmarshal %s response: %w", path, err)
-		}
-		return nil
+	req := &rosetta.RerankRequest{
+		Model:     c.cfg.RerankModel,
+		Query:     query,
+		Documents: documents,
+		TopN:      topN,
 	}
-	return attemptErr
+	resp, err := rerankLLM.Rerank(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("rerank: %w", err)
+	}
+	order := make([]int, 0, len(resp.Results))
+	for _, r := range resp.Results {
+		order = append(order, r.Index)
+	}
+	return order, nil
 }
 
 func sleepIfRetry(ctx context.Context, attempt, seconds int) {
@@ -315,19 +391,4 @@ func IsLoopbackEndpoint(endpoint string) bool {
 		return ip.IsLoopback()
 	}
 	return false
-}
-
-func apiURL(endpoint, path string) string {
-	base := strings.TrimRight(endpoint, "/")
-	if !strings.HasSuffix(base, "/v1") {
-		base += "/v1"
-	}
-	return base + "/" + path
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }

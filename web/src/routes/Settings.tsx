@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Building2 } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { ErrorNote, Notice, Spinner, controlClass } from '../components/ui';
@@ -8,43 +6,14 @@ import { aiApi, authToken, configApi } from '../api/client';
 import { PageHeader } from '../components/layout';
 import type { LLMConfig, PrivacyInfo } from '../api/types';
 
-type Field = { key: keyof LLMConfig; label: string; hint?: string; type?: string; placeholder?: string };
-
-const EMBED_FIELDS: Field[] = [
-  { key: 'embed_endpoint', label: 'Embedding API 地址', hint: '留空则沿用上面的对话 API 地址' },
-  { key: 'embed_api_key', label: 'Embedding API Key', hint: '留空则沿用上面的 API Key', type: 'password' },
-  { key: 'embed_model', label: 'Embedding 模型', hint: '留空则没有语义检索，只用近期记录兜底' },
-  { key: 'embed_dim', label: 'Embedding 维度', type: 'number', hint: '必须与模型输出维度一致；改这里需要重建索引' },
-];
-
 const TABS = [
   { id: 'llm', label: '大语言模型' },
   { id: 'embedding', label: '向量模型' },
+  { id: 'rerank', label: '重排模型' },
   { id: 'privacy', label: '隐私与安全' },
-  { id: 'other', label: '其他设置' },
 ] as const;
 
 type Tab = (typeof TABS)[number]['id'];
-
-function Fields({ items, config, patch }: { items: Field[]; config: LLMConfig; patch: (key: keyof LLMConfig, value: string | number) => void }) {
-  return (
-    <>
-      {items.map((item) => (
-        <label key={item.key} className="block text-sm text-muted-foreground">
-          {item.label}
-          <input
-            type={item.type ?? 'text'}
-            value={String(config[item.key] ?? '')}
-            onChange={(e) => patch(item.key, item.type === 'number' ? Number(e.target.value) || 0 : e.target.value)}
-            placeholder={item.placeholder}
-            className={`${controlClass} mt-1`}
-          />
-          {item.hint ? <span className="mt-1 block text-xs text-muted-foreground/70">{item.hint}</span> : null}
-        </label>
-      ))}
-    </>
-  );
-}
 
 export default function Settings() {
   const [config, setConfig] = useState<LLMConfig | null>(null);
@@ -165,7 +134,7 @@ export default function Settings() {
         title="设置"
         description="模型端点、协议与密钥；改完记得保存"
         actions={
-          tab === 'llm' || tab === 'embedding' ? (
+          tab === 'llm' || tab === 'embedding' || tab === 'rerank' ? (
             <Button onClick={save} disabled={saving}>
               {saving ? '保存中…' : '保存配置'}
             </Button>
@@ -296,15 +265,108 @@ export default function Settings() {
                   </Badge>
                 )}
               </div>
-              <Fields items={EMBED_FIELDS} config={config} patch={patch} />
-              <div className="flex flex-wrap items-center gap-3">
-                <Button onClick={checkEmbedding} disabled={checking} variant="outline">
+
+              {/* 第一行：Embedding API 地址 */}
+              <label className="block text-sm text-muted-foreground">
+                Embedding API 地址
+                <input
+                  value={String(config.embed_endpoint ?? '')}
+                  onChange={(e) => patch('embed_endpoint', e.target.value)}
+                  placeholder="留空则沿用对话 API 地址，如 http://localhost:11434"
+                  className={`${controlClass} mt-1`}
+                />
+                <span className="mt-1 block text-xs text-muted-foreground/70">语义检索的独立端点；本地 Ollama / LM Studio 填本机地址</span>
+              </label>
+
+              {/* 第二行：Embedding API Key + 维度 */}
+              <div className="grid grid-cols-[minmax(0,1fr)_11rem] gap-3">
+                <label className="block text-sm text-muted-foreground">
+                  Embedding API Key
+                  <input
+                    type="password"
+                    value={String(config.embed_api_key ?? '')}
+                    onChange={(e) => patch('embed_api_key', e.target.value)}
+                    className={`${controlClass} mt-1`}
+                  />
+                  <span className="mt-1 block text-xs text-muted-foreground/70">留空则沿用对话 API Key</span>
+                </label>
+                <label className="block text-sm text-muted-foreground">
+                  Embedding 维度
+                  <input
+                    type="number"
+                    value={String(config.embed_dim ?? '')}
+                    onChange={(e) => patch('embed_dim', Number(e.target.value) || 0)}
+                    className={`${controlClass} mt-1`}
+                  />
+                  <span className="mt-1 block text-xs text-muted-foreground/70">改这里需要重建索引</span>
+                </label>
+              </div>
+
+              {/* 第三行：Embedding 模型 + 检测 / 重建按钮 */}
+              <div className="flex items-end gap-3">
+                <label className="block min-w-0 flex-1 text-sm text-muted-foreground">
+                  Embedding 模型
+                  <input
+                    value={String(config.embed_model ?? '')}
+                    onChange={(e) => patch('embed_model', e.target.value)}
+                    placeholder="如 nomic-embed-text"
+                    className={`${controlClass} mt-1`}
+                  />
+                  <span className="mt-1 block text-xs text-muted-foreground/70">留空则没有语义检索，只用近期记录兜底</span>
+                </label>
+                <Button variant="outline" onClick={checkEmbedding} disabled={checking} className="mb-6 shrink-0">
                   {checking ? '检测中…' : '检测 Embedding'}
                 </Button>
-                <Button onClick={reindex} disabled={reindexing} variant="outline">
+                <Button variant="outline" onClick={reindex} disabled={reindexing} className="mb-6 shrink-0">
                   {reindexing ? '重建中，可能需要几分钟…' : '重建向量索引'}
                 </Button>
               </div>
+            </div>
+          ) : null}
+
+          {tab === 'rerank' ? (
+            <div className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm">
+              <h2 className="text-sm font-semibold text-foreground">Rerank（检索重排）</h2>
+
+              {/* 第一行：Rerank API 地址 */}
+              <label className="block text-sm text-muted-foreground">
+                Rerank API 地址
+                <input
+                  value={String(config.rerank_endpoint ?? '')}
+                  onChange={(e) => patch('rerank_endpoint', e.target.value)}
+                  placeholder="留空则沿用 Embedding API 地址"
+                  className={`${controlClass} mt-1`}
+                />
+                <span className="mt-1 block text-xs text-muted-foreground/70">
+                  重排与向量模型不一家时（Jina、Cohere 等）在这里单独填，Cohere 格式 /rerank 接口
+                </span>
+              </label>
+
+              {/* 第二行：Rerank API Key */}
+              <label className="block text-sm text-muted-foreground">
+                Rerank API Key
+                <input
+                  type="password"
+                  value={String(config.rerank_api_key ?? '')}
+                  onChange={(e) => patch('rerank_api_key', e.target.value)}
+                  placeholder="留空则沿用 Embedding API Key"
+                  className={`${controlClass} mt-1`}
+                />
+              </label>
+
+              {/* 第三行：Rerank 模型 */}
+              <label className="block text-sm text-muted-foreground">
+                Rerank 模型
+                <input
+                  value={String(config.rerank_model ?? '')}
+                  onChange={(e) => patch('rerank_model', e.target.value)}
+                  placeholder="留空关闭，如 bge-reranker-v2-m3"
+                  className={`${controlClass} mt-1`}
+                />
+                <span className="mt-1 block text-xs text-muted-foreground/70">
+                  配置后，建议生成的检索证据先经重排再进提示词；检索时失败会如实报告，不静默降级
+                </span>
+              </label>
             </div>
           ) : null}
 
@@ -381,21 +443,6 @@ export default function Settings() {
             </div>
           ) : null}
 
-          {tab === 'other' ? (
-            <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-              <h2 className="mb-2 text-sm font-semibold text-foreground">组织管理</h2>
-              <p className="mb-3 text-sm text-muted-foreground">
-                组织已移到独立页面：新建、编辑、归档与成员任职都在那里管理。
-              </p>
-              <Link
-                to="/organizations"
-                className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-primary hover:text-primary"
-              >
-                <Building2 className="size-4" />
-                前往组织管理
-              </Link>
-            </div>
-          ) : null}
         </section>
       </div>
     </div>

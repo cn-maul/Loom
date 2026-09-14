@@ -38,11 +38,18 @@ const adviceEventID = "e1"
 
 type adviceFixture struct {
 	svc       *AdviceService
+	ai        *AIService
 	advice    *repository.AdviceRepo
 	events    *repository.EventRepo
 	followUps *repository.FollowUpRepo
 	vec       *repository.VecRepo
 	person    *models.Person
+	// cfg is the live LLMConfig the AI client reads at call time; rerank tests
+	// flip RerankModel on it. rerankBody is what the stub answers on /v1/rerank
+	// (empty = HTTP 500); rerankCalls counts every hit regardless.
+	cfg         *config.LLMConfig
+	rerankBody  *string
+	rerankCalls *int
 }
 
 // newAdviceFixture stands up a stubbed provider. Embedding responses are
@@ -66,10 +73,21 @@ func newAdviceFixture(t *testing.T, initVec bool, embedBody string) *adviceFixtu
 	followUpRepo := repository.NewFollowUpRepo(database)
 	vec := repository.NewVecRepo(database)
 
+	rerankBody := ""
+	rerankCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/v1/embeddings" {
 			_, _ = w.Write([]byte(embedBody))
+			return
+		}
+		if r.URL.Path == "/v1/rerank" {
+			rerankCalls++
+			if rerankBody == "" {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write([]byte(rerankBody))
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -103,15 +121,19 @@ func newAdviceFixture(t *testing.T, initVec bool, embedBody string) *adviceFixtu
 	aiService := NewAIService(cfg, vec, traitRepo, eventRepo, personRepo, repository.NewRelationshipRepo(database), repository.NewPositionRepo(database), ai.NewClient(cfg))
 	return &adviceFixture{
 		svc:       NewAdviceService(adviceRepo, eventRepo, followUpRepo, persons, aiService),
+		ai:        aiService,
 		advice:    adviceRepo,
 		events:    eventRepo,
 		followUps: followUpRepo,
 		vec:       vec,
 		person:    person,
+		cfg:         cfg,
+		rerankBody:  &rerankBody,
+		rerankCalls: &rerankCalls,
 	}
 }
 
-const embedOK = `{"data":[{"embedding":[1,0,0,0]}]}`
+const embedOK = `{"data":[{"index":0,"embedding":[1,0,0,0]}]}`
 
 func (f *adviceFixture) seedEvent(t *testing.T, id, rawText string) *models.Event {
 	t.Helper()
@@ -217,6 +239,90 @@ func TestAdviceGenerateDistinguishesRetrievalOutcomes(t *testing.T) {
 	broken.seedEvent(t, "e1", "开会")
 	if got := broken.ask(t).RetrievalStatus; got != models.RetrievalFailed {
 		t.Fatalf("a broken embedding endpoint = %q, want %q", got, models.RetrievalFailed)
+	}
+}
+
+// With rerank configured, the over-fetched vector candidates are rescored and
+// reordered before they reach the prompt — that is the whole point of the pass.
+func TestAdviceRerankReordersRetrievedEvents(t *testing.T) {
+	f := newAdviceFixture(t, true, embedOK)
+	f.seedEvent(t, "e1", "一")
+	f.seedEvent(t, "e2", "二")
+	f.seedEvent(t, "e3", "三")
+	// Distinct distances from the question's vector [1,0,0,0]: cosine order
+	// comes back e1, e2, e3.
+	for id, vec := range map[string][]float32{
+		"e1": {1, 0, 0, 0},
+		"e2": {1, 0.5, 0, 0},
+		"e3": {0, 1, 0, 0},
+	} {
+		if err := f.vec.Insert("event:"+id, vec, f.person.ID, "event_summary", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The reranker disagrees: e3 first, then e1, then e2.
+	*f.rerankBody = `{"results":[{"index":2,"relevance_score":0.9},{"index":0,"relevance_score":0.5},{"index":1,"relevance_score":0.1}]}`
+	f.cfg.RerankModel = "test-reranker"
+
+	events, _, status := f.ai.retrieveRelated(context.Background(), f.person.ID, "怎么跟他提延期")
+	if status != models.RetrievalVectorUsed {
+		t.Fatalf("status = %q, want %q", status, models.RetrievalVectorUsed)
+	}
+	if *f.rerankCalls == 0 {
+		t.Fatal("a configured rerank model must be called")
+	}
+	ids := make([]string, 0, len(events))
+	for _, e := range events {
+		ids = append(ids, e.ID)
+	}
+	if len(ids) != 3 || ids[0] != "e3" || ids[1] != "e1" || ids[2] != "e2" {
+		t.Fatalf("reranked order = %v, want [e3 e1 e2]", ids)
+	}
+}
+
+// A configured rerank that fails is a hard retrieval failure, not a silent
+// fallback to cosine order — the status must say so, and advice generation
+// itself survives on the recency fallback.
+func TestAdviceRerankFailureIsHonest(t *testing.T) {
+	f := newAdviceFixture(t, true, embedOK)
+	f.seedEvent(t, "e1", "一")
+	f.seedEvent(t, "e2", "二")
+	for _, id := range []string{"e1", "e2"} {
+		if err := f.vec.Insert("event:"+id, []float32{1, 0, 0, 0}, f.person.ID, "event_summary", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// RerankModel set, rerankBody left empty: the stub answers 500.
+	f.cfg.RerankModel = "test-reranker"
+
+	events, _, status := f.ai.retrieveRelated(context.Background(), f.person.ID, "怎么跟他提延期")
+	if status != models.RetrievalFailed || events != nil {
+		t.Fatalf("a broken rerank = (events=%v, status=%q), want (nil, %q)", events, status, models.RetrievalFailed)
+	}
+
+	session := f.ask(t)
+	if session.RetrievalStatus != models.RetrievalFailed {
+		t.Fatalf("session status = %q, want %q", session.RetrievalStatus, models.RetrievalFailed)
+	}
+	if len(session.UsedEventIDs) == 0 {
+		t.Fatal("the recency fallback must still give the model something to cite")
+	}
+}
+
+// Without rerank_model the retrieval path must not touch /rerank at all.
+func TestAdviceWithoutRerankModelNeverCallsIt(t *testing.T) {
+	f := newAdviceFixture(t, true, embedOK)
+	for _, id := range []string{"e1", "e2", "e3"} {
+		f.seedEvent(t, id, id)
+		if err := f.vec.Insert("event:"+id, []float32{1, 0, 0, 0}, f.person.ID, "event_summary", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, status := f.ai.retrieveRelated(context.Background(), f.person.ID, "怎么跟他提延期"); status != models.RetrievalVectorUsed {
+		t.Fatalf("status = %q, want %q", status, models.RetrievalVectorUsed)
+	}
+	if *f.rerankCalls != 0 {
+		t.Fatalf("rerank called %d time(s) with no model configured", *f.rerankCalls)
 	}
 }
 

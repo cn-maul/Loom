@@ -86,10 +86,7 @@ func newStructureAPI(t *testing.T) *structureFixture {
 	e := echo.New()
 	api := e.Group("/api")
 	api.POST("/relationships", relHandler.Create)
-	api.GET("/relationships", relHandler.List)
 	api.GET("/relationships/types", relHandler.ListTypes)
-	api.GET("/relationships/co-attendance", relHandler.CoAttendance)
-	api.GET("/relationships/:id", relHandler.Get)
 	api.PUT("/relationships/:id", relHandler.Update)
 	api.DELETE("/relationships/:id", relHandler.Delete)
 	api.GET("/persons/:id/relationships", relHandler.ListByPerson)
@@ -139,14 +136,14 @@ func TestRelationshipAPICreateThenClose(t *testing.T) {
 		t.Fatalf("closing the edge returned %d: %+v", status, resp.Error)
 	}
 
-	status, resp = doJSON(t, f.e, http.MethodGet, "/api/relationships?active=true", "")
+	status, resp = doJSON(t, f.e, http.MethodGet, "/api/persons/"+f.persons[0].ID+"/relationships?active=true", "")
 	if status != http.StatusOK {
 		t.Fatalf("active filter returned %d", status)
 	}
 	if items, _ := resp.Data.([]any); len(items) != 0 {
 		t.Fatalf("a closed edge must not count as active, got %d", len(items))
 	}
-	status, resp = doJSON(t, f.e, http.MethodGet, "/api/relationships", "")
+	status, resp = doJSON(t, f.e, http.MethodGet, "/api/persons/"+f.persons[0].ID+"/relationships", "")
 	if status != http.StatusOK {
 		t.Fatalf("listing all edges returned %d", status)
 	}
@@ -154,7 +151,7 @@ func TestRelationshipAPICreateThenClose(t *testing.T) {
 		t.Fatal("a closed edge must still be listed as history")
 	}
 
-	// The static routes must win over /relationships/:id.
+	// The static routes must win over the pattern routes on the same prefix.
 	status, resp = doJSON(t, f.e, http.MethodGet, "/api/relationships/types", "")
 	if status != http.StatusOK {
 		t.Fatalf("types returned %d", status)
@@ -162,19 +159,12 @@ func TestRelationshipAPICreateThenClose(t *testing.T) {
 	if types, _ := resp.Data.([]any); len(types) != 1 || types[0] != "上级" {
 		t.Fatalf("types = %+v", types)
 	}
-	status, resp = doJSON(t, f.e, http.MethodGet, "/api/relationships/co-attendance", "")
-	if status != http.StatusOK {
-		t.Fatalf("co-attendance returned %d", status)
-	}
-	if pairs, _ := resp.Data.([]any); len(pairs) != 1 {
-		t.Fatalf("the shared record should produce one pair, got %d", len(pairs))
-	}
 }
 
 func TestStructureAPIStatusClassification(t *testing.T) {
 	f := newStructureAPI(t)
 	ghost := uuid.New().String()
-	edge := f.createRelationship(t, f.relationshipPayload(""))
+	f.createRelationship(t, f.relationshipPayload(""))
 
 	cases := []struct {
 		name   string
@@ -199,13 +189,12 @@ func TestStructureAPIStatusClassification(t *testing.T) {
 		{"backwards date window", http.MethodPost, "/api/relationships",
 			`{"from_person_id":"` + f.persons[0].ID + `","to_person_id":"` + f.persons[1].ID + `","relation_type":"上级","start_date":"2026-09-01","end_date":"2026-08-01"}`,
 			http.StatusBadRequest, "INVALID_INPUT"},
-		{"unknown edge", http.MethodGet, "/api/relationships/" + ghost, "", http.StatusNotFound, "NOT_FOUND"},
 		{"update unknown edge", http.MethodPut, "/api/relationships/" + ghost,
 			`{"from_person_id":"` + f.persons[0].ID + `","to_person_id":"` + f.persons[1].ID + `","relation_type":"上级"}`,
 			http.StatusNotFound, "NOT_FOUND"},
 		{"delete unknown edge", http.MethodDelete, "/api/relationships/" + ghost, "", http.StatusNotFound, "NOT_FOUND"},
-		{"bad confirmed filter", http.MethodGet, "/api/relationships?confirmed=7", "", http.StatusBadRequest, "INVALID_INPUT"},
-		{"bad active filter", http.MethodGet, "/api/relationships?active=maybe", "", http.StatusBadRequest, "INVALID_INPUT"},
+		{"bad confirmed filter", http.MethodGet, "/api/persons/" + f.persons[0].ID + "/relationships?confirmed=7", "", http.StatusBadRequest, "INVALID_INPUT"},
+		{"bad active filter", http.MethodGet, "/api/persons/" + f.persons[0].ID + "/relationships?active=maybe", "", http.StatusBadRequest, "INVALID_INPUT"},
 		{"unknown org members", http.MethodGet, "/api/organizations/" + ghost + "/members", "", http.StatusNotFound, "ORG_NOT_FOUND"},
 		{"posting at unknown org", http.MethodPost, "/api/persons/" + f.persons[0].ID + "/positions",
 			`{"org_id":"` + ghost + `","role":"总监"}`, http.StatusNotFound, "ORG_NOT_FOUND"},
@@ -232,9 +221,12 @@ func TestStructureAPIStatusClassification(t *testing.T) {
 	}
 
 	// The edge created before the table still exists after all the failures.
-	status, _ := doJSON(t, f.e, http.MethodGet, "/api/relationships/"+edge, "")
+	status, resp := doJSON(t, f.e, http.MethodGet, "/api/persons/"+f.persons[0].ID+"/relationships", "")
 	if status != http.StatusOK {
-		t.Fatalf("the seeded edge disappeared, GET returned %d", status)
+		t.Fatalf("the seeded edge disappeared, list returned %d", status)
+	}
+	if items, _ := resp.Data.([]any); len(items) != 1 {
+		t.Fatalf("the seeded edge must survive the failed requests, got %d item(s)", len(items))
 	}
 }
 

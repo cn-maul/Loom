@@ -83,6 +83,31 @@ func (r *PersonRepo) GetByID(id string) (*models.Person, error) {
 	return person, nil
 }
 
+// GetSelf returns the reserved person that represents the user (is_self = 1).
+func (r *PersonRepo) GetSelf() (*models.Person, error) {
+	person := &models.Person{}
+	var created, updated string
+	var relation, notes, orgID, position, gender sql.NullString
+	err := r.db.QueryRow(`SELECT ` + personColumns + ` FROM persons WHERE is_self = 1`).Scan(
+		&person.ID, &person.Name, &relation, &person.Importance,
+		&notes, &orgID, &position, &gender, &person.IsSelf, &created, &updated,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, models.NewError(models.ErrNotFound, "the self person does not exist yet")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get self person: %w", err)
+	}
+	person.Relation = scanNullString(&relation)
+	person.Notes = scanNullString(&notes)
+	person.OrgID = scanNullString(&orgID)
+	person.Position = scanNullString(&position)
+	person.Gender = scanNullString(&gender)
+	person.CreatedAt = models.ParseSQLiteTime(created)
+	person.UpdatedAt = models.ParseSQLiteTime(updated)
+	return person, nil
+}
+
 // ListWithActivity returns every person with the timeline metadata the home page
 // needs, ordered by most recent interaction rather than by record edits. A record
 // counts for someone who attended it as a participant, not only as the primary

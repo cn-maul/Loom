@@ -5,6 +5,7 @@ import EventTimeline from '../components/EventTimeline';
 import QuickRecord from '../components/QuickRecord';
 import TraitList from '../components/TraitList';
 import { ErrorNote, Spinner } from '../components/ui';
+import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Textarea } from '../components/ui/textarea';
 import { organizationApi, personApi, reportApi } from '../api/client';
@@ -180,7 +181,9 @@ export default function PersonDetail() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-semibold tracking-tight text-foreground">{person.name}</h1>
-                {person.relation ? (
+                {person.is_self ? (
+                  <Badge variant="secondary">我 · 系统保留</Badge>
+                ) : person.relation ? (
                   <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
                     {person.relation}
                   </span>
@@ -246,14 +249,18 @@ export default function PersonDetail() {
             )}
 
             <div className="mt-4 border-t border-border pt-3">
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-muted-foreground hover:border-red-300 hover:text-red-600"
-                onClick={() => void removePerson()}
-              >
-                删除这个人物（不可撤销）
-              </Button>
+              {person.is_self ? (
+                <p className="text-xs text-muted-foreground">「我」是系统保留人物，代表使用系统的人，不能删除。</p>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-muted-foreground hover:border-red-300 hover:text-red-600"
+                  onClick={() => void removePerson()}
+                >
+                  删除这个人物（不可撤销）
+                </Button>
+              )}
             </div>
           </SectionCard>
 

@@ -23,7 +23,6 @@ PUT    /api/persons/:id                更新
 DELETE /api/persons/:id                删除（级联）
 POST   /api/organizations              创建组织
 GET    /api/organizations              组织列表
-GET    /api/organizations/:id          组织详情
 PUT    /api/organizations/:id          更新
 POST   /api/organizations/:id/archive  归档
 POST   /api/organizations/:id/restore  恢复
@@ -49,19 +48,15 @@ GET    /api/persons/:id/events                  该人物时间线
 
 ```
 POST   /api/relationships                       创建关系边
-GET    /api/relationships                       列表（person_id/type/confirmed/active/q/limit/offset）
 GET    /api/relationships/types                 已用关系类型
-GET    /api/relationships/co-attendance         共同经历（派生，非关系边）
-GET    /api/relationships/:id                   详情
 PUT    /api/relationships/:id                   更新
 DELETE /api/relationships/:id                   删除
 GET    /api/persons/:id/relationships           某人的关系
 GET    /api/graph                               全图（?limit= 人物节点上限，默认1000、硬上限5000；
-                                                超出时 nodes_total/truncated 明示截断）
+                                                超出时 nodes_total/truncated 明示截断；含共同经历派生对）
 POST   /api/persons/:id/positions               新增任职
 GET    /api/persons/:id/positions               任职历史
 GET    /api/organizations/:id/members           成员（current=true 现任筛选）
-GET    /api/positions/:id                       任职详情
 PUT    /api/positions/:id                       更新（写 end_date 即离任）
 DELETE /api/positions/:id                       删除
 ```
@@ -76,21 +71,20 @@ POST   /api/ai/infer-hierarchy                  按职位 AI 推断上下级（b
                                                 不覆盖已存在的有效关系；返回 {created, links}）
 GET    /api/ai/embeddings/status                向量索引状态
 GET    /api/ai/models                           对话端点的模型目录（string[]，经 rosetta 探测 /models，用当前已保存配置）
-GET    /api/tasks                               提取队列近期任务 + 队列统计（{tasks, stats}，
-                                                stats 含 enqueued/succeeded/failed/当前深度/耗时）
 GET    /api/config                              配置 + privacy 面板（{config, privacy}）
 PUT    /api/config                              更新 llm 块（async_extract/allow_remote 不受影响）
 GET    /api/audit                               审计记录（?limit=，新→旧）
-POST   /api/maintenance/cleanup                 数据治理：清理孤儿向量 + 按保留期修剪审计
-                                                日志，返回计数报告（每次启动也自动执行）
 ```
+
+> 数据治理（清理孤儿向量 + 按保留期修剪审计日志）在每次启动时自动执行，
+> 没有独立的手动触发端点；提取队列状态同样只存在于进程内部。
 
 ### 隐私与安全
 
 - `GET /api/config` 的 `privacy` 面板：监听地址、AI 端点是否外部、是否发送记录原文、
   `allow_remote`、令牌/备份加密是否开启——只报事实，不回显密钥与令牌。
-- `llm.allow_remote: false`（config.yaml）：拒绝把记录内容发送到非本机端点，chat 与
-  embeddings 双路 fail closed；错误信息给出改法。设置页不修改该开关。
+- `llm.allow_remote: false`（config.yaml）：拒绝把记录内容发送到非本机端点，chat、
+  embeddings 与 rerank 三路 fail closed；错误信息给出改法。设置页不修改该开关。
 - 备份加密：`backup.passphrase` 非空时快照为 `.db.enc`（AES-256-GCM + PBKDF2），
   `validate`/`restore` 透明解密；口令错误报「口令错误或文件已损坏」。暂存的恢复文件
   始终为明文 SQLite。
@@ -100,9 +94,8 @@ POST   /api/maintenance/cleanup                 数据治理：清理孤儿向�
 ### 异步提取（默认开启）
 
 `POST /api/events` 先落库（`extraction_status=pending`）并立即返回 201，
-`report.async=true`；提取、向量索引、画像刷新由进程内队列执行。任务状态
-（queued/processing/succeeded/failed、attempts、错误）通过 `GET /api/tasks`
-观察；记录本身的提取结果照常从事件接口读取。启动时自动把遗留的 pending
+`report.async=true`；提取、向量索引、画像刷新由进程内队列执行。记录本身的
+提取结果照常从事件接口读取。启动时自动把遗留的 pending
 记录重新入队（崩溃自愈）。同步模式可在 `config.yaml` 设 `llm.async_extract: false`；
 `PUT /api/config` 不改变该开关。
 

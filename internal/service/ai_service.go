@@ -702,6 +702,16 @@ func (s *AIService) GenerateAdvice(ctx context.Context, req models.AdviceRequest
 	return nil, lastErr
 }
 
+// Retrieval candidate depths. The vector KNN over-fetches, a configured
+// rerank pass (llm.rerank_model) rescores the candidates, and the keep counts
+// are what reach the prompt — the same limits the plain vector path always used.
+const (
+	retrievalEventCandidates = 24
+	retrievalEventKeep       = 5
+	retrievalTraitCandidates = 8
+	retrievalTraitKeep       = 3
+)
+
 // retrieveRelated returns the records and profile notes nearest to the question
 // and reports how the semantic branch fared. The three non-success outcomes are
 // kept apart on purpose: "no index is set up", "the search broke" and "nothing
@@ -714,7 +724,7 @@ func (s *AIService) retrieveRelated(ctx context.Context, personID, question stri
 	if err != nil {
 		return nil, nil, models.RetrievalFailed
 	}
-	eventResults, err := s.vecRepo.SearchByPerson(embedding, personID, "event_summary", 5)
+	eventResults, err := s.vecRepo.SearchByPerson(embedding, personID, "event_summary", retrievalEventCandidates)
 	if err != nil {
 		return nil, nil, models.RetrievalFailed
 	}
@@ -726,8 +736,12 @@ func (s *AIService) retrieveRelated(ctx context.Context, personID, question stri
 		}
 		events = append(events, event)
 	}
+	events, err = s.rerankEvents(ctx, question, events)
+	if err != nil {
+		return nil, nil, models.RetrievalFailed
+	}
 
-	traitResults, err := s.vecRepo.SearchByPerson(embedding, personID, "trait", 3)
+	traitResults, err := s.vecRepo.SearchByPerson(embedding, personID, "trait", retrievalTraitCandidates)
 	if err != nil {
 		return events, nil, models.RetrievalFailed
 	}
@@ -739,10 +753,80 @@ func (s *AIService) retrieveRelated(ctx context.Context, personID, question stri
 		}
 		traits = append(traits, trait)
 	}
+	traits, err = s.rerankTraits(ctx, question, traits)
+	if err != nil {
+		return events, nil, models.RetrievalFailed
+	}
 	if len(events) == 0 && len(traits) == 0 {
 		return nil, nil, models.RetrievalNoEvidence
 	}
 	return events, traits, models.RetrievalVectorUsed
+}
+
+// rerankEvents rescores the vector candidates with the configured rerank model
+// and keeps the top few. A rerank failure is a hard retrieval failure: a
+// configured-but-broken pass must not silently degrade to cosine order and
+// misorder evidence without telling anyone.
+func (s *AIService) rerankEvents(ctx context.Context, question string, events []*models.Event) ([]*models.Event, error) {
+	if len(events) < 2 {
+		return events, nil
+	}
+	if s.cfg.RerankModel == "" {
+		return events[:min(len(events), retrievalEventKeep)], nil
+	}
+	docs := make([]string, len(events))
+	for i, e := range events {
+		docs[i] = eventEmbedSource(e)
+	}
+	order, err := s.client.Rerank(ctx, question, docs, retrievalEventKeep)
+	if err != nil {
+		return nil, err
+	}
+	ranked := applyRerankOrder(events, order)
+	return ranked[:min(len(ranked), retrievalEventKeep)], nil
+}
+
+// rerankTraits is the trait-side twin of rerankEvents; the document text is
+// the same "key: value" string the trait was indexed with.
+func (s *AIService) rerankTraits(ctx context.Context, question string, traits []*models.Trait) ([]*models.Trait, error) {
+	if len(traits) < 2 {
+		return traits, nil
+	}
+	if s.cfg.RerankModel == "" {
+		return traits[:min(len(traits), retrievalTraitKeep)], nil
+	}
+	docs := make([]string, len(traits))
+	for i, t := range traits {
+		docs[i] = t.TraitKey + ": " + t.TraitValue
+	}
+	order, err := s.client.Rerank(ctx, question, docs, retrievalTraitKeep)
+	if err != nil {
+		return nil, err
+	}
+	ranked := applyRerankOrder(traits, order)
+	return ranked[:min(len(ranked), retrievalTraitKeep)], nil
+}
+
+// applyRerankOrder maps rerank result indexes back onto the candidates, ranked
+// first, then any candidate the reranker did not report keeps its cosine order
+// (the SDK rejects out-of-range and duplicate indexes, so the residue is only
+// candidates beyond the reranker's TopN). Callers truncate to the keep count.
+func applyRerankOrder[T any](items []T, order []int) []T {
+	ranked := make([]T, 0, len(items))
+	seen := make([]bool, len(items))
+	for _, idx := range order {
+		if idx < 0 || idx >= len(items) || seen[idx] {
+			continue
+		}
+		seen[idx] = true
+		ranked = append(ranked, items[idx])
+	}
+	for i, item := range items {
+		if !seen[i] {
+			ranked = append(ranked, item)
+		}
+	}
+	return ranked
 }
 
 // normalizeAdviceEvidence keeps only citations of records the model was actually

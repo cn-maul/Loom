@@ -19,23 +19,9 @@ func NewRelationshipHandler(service *service.RelationshipService) *RelationshipH
 	return &RelationshipHandler{service: service}
 }
 
-// List serves the graph query. person_id matches either end of an edge, so a
-// person's page shows both the edges they own and the ones pointing at them.
-func (h *RelationshipHandler) List(c echo.Context) error {
-	filter, err := relationshipFilter(c, "")
-	if err != nil {
-		return respondError(c, err, "LIST_FAILED")
-	}
-	links, err := h.service.List(filter)
-	if err != nil {
-		return respondError(c, err, "LIST_FAILED")
-	}
-	if links == nil {
-		links = []*models.RelationshipLink{}
-	}
-	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: links})
-}
-
+// ListByPerson serves one person's edges. person_id matches either end of an
+// edge, so a person's page shows both the edges they own and the ones pointing
+// at them.
 func (h *RelationshipHandler) ListByPerson(c echo.Context) error {
 	filter, err := relationshipFilter(c, c.Param("id"))
 	if err != nil {
@@ -57,24 +43,6 @@ func (h *RelationshipHandler) ListTypes(c echo.Context) error {
 		return respondError(c, err, "LIST_FAILED")
 	}
 	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: types})
-}
-
-// CoAttendance exposes derived "shared experience" pairs. They are computed from
-// records and deliberately not stored as relationship edges.
-func (h *RelationshipHandler) CoAttendance(c echo.Context) error {
-	pairs, err := h.service.CoAttendance(queryLimit(c, "limit", 0, MaxPageLimit))
-	if err != nil {
-		return respondError(c, err, "LIST_FAILED")
-	}
-	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: pairs})
-}
-
-func (h *RelationshipHandler) Get(c echo.Context) error {
-	link, err := h.service.GetByID(c.Param("id"))
-	if err != nil {
-		return respondError(c, err, "READ_FAILED")
-	}
-	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: link})
 }
 
 func (h *RelationshipHandler) Create(c echo.Context) error {

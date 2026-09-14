@@ -40,11 +40,8 @@ type App struct {
 	graphHandler        *handler.GraphHandler
 	adviceHandler       *handler.AdviceHandler
 	reportHandler       *handler.ReportHandler
-	tasksHandler        *handler.TasksHandler
 	backupHandler       *handler.BackupHandler
 	auditHandler        *handler.AuditHandler
-	maintenanceHandler  *handler.MaintenanceHandler
-	dashboardHandler    *handler.DashboardHandler
 	backupSvc           *backup.Service
 }
 
@@ -98,6 +95,12 @@ func (a *App) wire(database *sql.DB) error {
 	aiClient := ai.NewClient(&cfg.LLM)
 
 	personService := service.NewPersonService(personRepo, vecRepo, orgRepo)
+	// Seed the reserved “我” person so records can name the user as their
+	// subject or a participant from the first launch. A failed seed must not
+	// block startup; the next launch retries.
+	if err := personService.EnsureSelf(); err != nil {
+		log.Printf("WARNING: seed self person failed: %v", err)
+	}
 	orgService := service.NewOrganizationService(orgRepo)
 	eventService := service.NewEventService(eventRepo, vecRepo, personService, traitRepo)
 	aiService := service.NewAIService(&cfg.LLM, vecRepo, traitRepo, eventRepo, personRepo,
@@ -127,8 +130,6 @@ func (a *App) wire(database *sql.DB) error {
 	a.graphHandler = handler.NewGraphHandler(graphService)
 	a.adviceHandler = handler.NewAdviceHandler(adviceService)
 	a.reportHandler = handler.NewReportHandler(reportService)
-	a.tasksHandler = handler.NewTasksHandler(ingestService)
-	a.dashboardHandler = handler.NewDashboardHandler(service.NewDashboardService(database))
 
 	// Data lifecycle: scheduled snapshots with sane fallbacks when the config
 	// section is absent or nonsensical.
@@ -150,11 +151,9 @@ func (a *App) wire(database *sql.DB) error {
 	a.backupHandler = handler.NewBackupHandler(a.backupSvc)
 	a.auditHandler = handler.NewAuditHandler(database)
 
-	// Data hygiene: startup pass removes vectors orphaned by crashes and trims
-	// the audit log when a retention window is configured. The handler offers
-	// the same pass on demand with a visible report.
+	// Data hygiene: a startup pass removes vectors orphaned by crashes and
+	// trims the audit log when a retention window is configured.
 	maintenanceSvc := service.NewMaintenanceService(database, vecRepo, cfg.Maintenance.AuditRetentionDays)
-	a.maintenanceHandler = handler.NewMaintenanceHandler(maintenanceSvc)
 	if report, err := maintenanceSvc.Cleanup(); err != nil {
 		log.Printf("WARNING: startup maintenance pass failed: %v", err)
 	} else if report.OrphanVectors > 0 || report.AuditRowsRemoved > 0 {

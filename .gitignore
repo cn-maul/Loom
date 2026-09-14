@@ -38,3 +38,6 @@ Thumbs.db
 /backups/
 /gh_*.json
 *.exe~
+
+# ZCode session artifacts
+.zcode/

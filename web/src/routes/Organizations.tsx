@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Building2, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
+import { Badge } from '../components/ui/badge';
 import { ErrorNote, Notice, Spinner, controlClass } from '../components/ui';
 import { Button } from '../components/ui/button';
 import { Avatar, EmptyState, Field, PageHeader, SectionCard } from '../components/layout';
@@ -353,16 +354,6 @@ export default function Organizations() {
                     className={`${controlClass} h-9`}
                   />
                 </Field>
-                <Field label="重要度（1-5）">
-                  <input
-                    type="number"
-                    min={1}
-                    max={5}
-                    value={personDraft.importance}
-                    onChange={(e) => setPersonDraft({ ...personDraft, importance: Number(e.target.value) || 3 })}
-                    className={`${controlClass} h-9`}
-                  />
-                </Field>
                 <div className="md:col-span-2">
                   <Field label="备注">
                     <textarea
@@ -446,6 +437,9 @@ export default function Organizations() {
                       <Link to={`/persons/${person.id}`} className="truncate text-sm font-medium text-foreground hover:text-primary">
                         {person.name}
                       </Link>
+                      {person.is_self ? (
+                        <Badge variant="secondary" className="shrink-0">我</Badge>
+                      ) : null}
                     </div>
                     <span className="truncate text-xs text-muted-foreground">{person.gender || '—'}</span>
                     <span className="hidden truncate text-xs text-muted-foreground sm:block">{person.org_name || '—'}</span>
@@ -458,13 +452,15 @@ export default function Organizations() {
                       >
                         <Pencil className="size-3.5" />
                       </button>
-                      <button
-                        onClick={() => void deletePerson(person)}
-                        title={`删除「${person.name}」`}
-                        className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-background hover:text-red-600"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
+                      {person.is_self ? null : (
+                        <button
+                          onClick={() => void deletePerson(person)}
+                          title={`删除「${person.name}」`}
+                          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-background hover:text-red-600"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      )}
                     </div>
                   </li>
                 ))}

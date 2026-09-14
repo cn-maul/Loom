@@ -1,5 +1,4 @@
 import type {
-  DashboardStats,
   AdoptRequest,
   AdviceRequest,
   AdviceSession,
@@ -132,18 +131,6 @@ export const personApi = {
     const query = search.toString();
     return request<PersonWithActivity[]>(`/persons${query ? `?${query}` : ''}`);
   },
-  /** Paged variant that also hands back the server's match count. */
-  listPaged: (params?: PersonListParams) => {
-    const search = new URLSearchParams();
-    if (params?.q) search.set('q', params.q);
-    if (params?.org_id) search.set('org_id', params.org_id);
-    if (params?.relation) search.set('relation', params.relation);
-    if (params?.sort) search.set('sort', params.sort);
-    if (params?.limit) search.set('limit', String(params.limit));
-    if (params?.offset) search.set('offset', String(params.offset));
-    const query = search.toString();
-    return requestPaged<PersonWithActivity[]>(`/persons${query ? `?${query}` : ''}`);
-  },
   get: (id: string) => request<Person>(`/persons/${id}`),
   create: (person: Partial<Person>) => request<Person>('/persons', { method: 'POST', body: JSON.stringify(person) }),
   update: (id: string, person: Partial<Person>) =>
@@ -190,11 +177,6 @@ export const positionApi = {
   byPerson: (personId: string) => request<OrgPositionLink[]>(`/persons/${personId}/positions`),
   create: (personId: string, pos: { org_id: string; role?: string; start_date?: string; end_date?: string; notes?: string }) =>
     request<OrgPositionLink>(`/persons/${personId}/positions`, { method: 'POST', body: JSON.stringify(pos) }),
-  // Like the org-side helper: the PUT replaces the whole posting, so every
-  // field has to travel along even when only one of them changed.
-  update: (id: string, pos: Partial<OrgPositionLink> & { person_id: string; org_id: string }) =>
-    request<OrgPositionLink>(`/positions/${id}`, { method: 'PUT', body: JSON.stringify(pos) }),
-  remove: (id: string) => request<null>(`/positions/${id}`, { method: 'DELETE' }),
 };
 
 export const eventApi = {
@@ -331,11 +313,6 @@ export const auditApi = {
 // client-side because the dataset is personal-CRM sized.
 export const graphApi = {
   get: () => request<GraphData>('/graph'),
-};
-
-// The landing page reads one aggregate instead of five separate lists.
-export const dashboardApi = {
-  stats: () => request<DashboardStats>('/dashboard/stats'),
 };
 
 export const relationshipApi = {

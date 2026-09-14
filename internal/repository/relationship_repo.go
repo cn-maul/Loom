@@ -149,35 +149,6 @@ func (r *RelationshipRepo) Delete(id string) error {
 	return requireRow(res, "relationship", id)
 }
 
-// ListCoAttendance derives the pairs of people who appear on the same record,
-// ordered by how many records they share. The graph shows these as "shared
-// experience" links and must not turn them into typed relationship edges.
-func (r *RelationshipRepo) ListCoAttendance(limit int) ([]*models.CoAttendance, error) {
-	rows, err := r.db.Query(`
-		SELECT a.person_id, b.person_id, COALESCE(pa.name, ''), COALESCE(pb.name, ''), COUNT(*) AS shared
-		FROM event_participants a
-		JOIN event_participants b ON b.event_id = a.event_id AND b.person_id > a.person_id
-		LEFT JOIN persons pa ON pa.id = a.person_id
-		LEFT JOIN persons pb ON pb.id = b.person_id
-		GROUP BY a.person_id, b.person_id
-		ORDER BY shared DESC, a.person_id, b.person_id
-		LIMIT ?`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("list co-attendance: %w", err)
-	}
-	defer rows.Close()
-
-	pairs := []*models.CoAttendance{}
-	for rows.Next() {
-		pair := &models.CoAttendance{}
-		if err := rows.Scan(&pair.PersonAID, &pair.PersonBID, &pair.PersonAName, &pair.PersonBName, &pair.SharedEvents); err != nil {
-			return nil, fmt.Errorf("scan co-attendance: %w", err)
-		}
-		pairs = append(pairs, pair)
-	}
-	return pairs, rows.Err()
-}
-
 // ListTypes returns the distinct relation types already in use, so a picker can
 // offer them instead of forcing free text.
 func (r *RelationshipRepo) ListTypes() ([]string, error) {

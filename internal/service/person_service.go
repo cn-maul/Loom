@@ -1,11 +1,19 @@
 package service
 
 import (
+	"errors"
 	"strings"
 
 	"relationship/internal/models"
 	"relationship/internal/repository"
+
+	"github.com/google/uuid"
 )
+
+// SelfName is the reserved person representing the user. The user is not a
+// contact, but records are written from their perspective and may name them as
+// the subject or a participant, so exactly one is seeded at startup.
+const SelfName = "我"
 
 type PersonService struct {
 	repo    *repository.PersonRepo
@@ -77,10 +85,37 @@ func (s *PersonService) Update(person *models.Person) error {
 	return s.repo.Update(person)
 }
 
+// EnsureSelf seeds the reserved self person when the database has none, so “我”
+// exists as an anchor and participant candidate from the first launch. Idempotent.
+func (s *PersonService) EnsureSelf() error {
+	_, err := s.repo.GetSelf()
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, models.ErrNotFound) {
+		return err
+	}
+	return s.repo.Create(&models.Person{
+		ID:         uuid.New().String(),
+		Name:       SelfName,
+		IsSelf:     1,
+		Importance: 3,
+	})
+}
+
 // Delete drops the person. Records they attended survive as long as another
 // participant remains, because events.person_id is ON DELETE SET NULL and the
 // attendance rows cascade; events and traits they owned outright still cascade.
+// The reserved self person is not deletable: every future record is written
+// from their perspective.
 func (s *PersonService) Delete(id string) error {
+	person, err := s.repo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if person.IsSelf == 1 {
+		return models.NewError(models.ErrInvalidInput, "「我」是系统保留人物，不能删除")
+	}
 	if err := s.repo.Delete(id); err != nil {
 		return err
 	}

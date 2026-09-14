@@ -51,10 +51,6 @@ func (a *App) registerAPI(e *echo.Echo) {
 
 	// Security-sensitive operations are listed for visibility.
 	api.GET("/audit", a.auditHandler.List)
-	api.POST("/maintenance/cleanup", a.maintenanceHandler.Cleanup)
-
-	// Landing-page aggregate: counts plus the latest activity.
-	api.GET("/dashboard/stats", a.dashboardHandler.Stats)
 
 	// People and organisations.
 	api.POST("/persons", a.personHandler.Create)
@@ -64,7 +60,6 @@ func (a *App) registerAPI(e *echo.Echo) {
 	api.DELETE("/persons/:id", a.personHandler.Delete)
 	api.POST("/organizations", a.orgHandler.Create)
 	api.GET("/organizations", a.orgHandler.List)
-	api.GET("/organizations/:id", a.orgHandler.GetByID)
 	api.PUT("/organizations/:id", a.orgHandler.Update)
 	api.POST("/organizations/:id/archive", a.orgHandler.Archive)
 	api.POST("/organizations/:id/restore", a.orgHandler.Restore)
@@ -85,10 +80,7 @@ func (a *App) registerAPI(e *echo.Echo) {
 
 	// Structured relationships and organisation postings.
 	api.POST("/relationships", a.relationshipHandler.Create)
-	api.GET("/relationships", a.relationshipHandler.List)
 	api.GET("/relationships/types", a.relationshipHandler.ListTypes)
-	api.GET("/relationships/co-attendance", a.relationshipHandler.CoAttendance)
-	api.GET("/relationships/:id", a.relationshipHandler.Get)
 	api.PUT("/relationships/:id", a.relationshipHandler.Update)
 	api.DELETE("/relationships/:id", a.relationshipHandler.Delete)
 	api.GET("/persons/:id/relationships", a.relationshipHandler.ListByPerson)
@@ -96,7 +88,6 @@ func (a *App) registerAPI(e *echo.Echo) {
 	api.POST("/persons/:id/positions", a.positionHandler.Create)
 	api.GET("/persons/:id/positions", a.positionHandler.ListByPerson)
 	api.GET("/organizations/:id/members", a.positionHandler.ListByOrg)
-	api.GET("/positions/:id", a.positionHandler.Get)
 	api.PUT("/positions/:id", a.positionHandler.Update)
 	api.DELETE("/positions/:id", a.positionHandler.Delete)
 
@@ -107,7 +98,6 @@ func (a *App) registerAPI(e *echo.Echo) {
 	api.GET("/ai/embeddings/status", a.aiHandler.EmbeddingStatus)
 	api.GET("/ai/models", a.aiHandler.ListModels)
 	api.POST("/ai/infer-hierarchy", a.aiHandler.InferHierarchy)
-	api.GET("/tasks", a.tasksHandler.List)
 	api.GET("/config", a.configHandler.Get)
 	api.PUT("/config", a.configHandler.Update)
 

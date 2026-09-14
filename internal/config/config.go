@@ -58,6 +58,16 @@ type LLMConfig struct {
 	EmbedAPIKey   string `yaml:"embed_api_key" json:"embed_api_key"`
 	EmbedModel    string `yaml:"embed_model" json:"embed_model"`
 	EmbedDim      int    `yaml:"embed_dim" json:"embed_dim"`
+	// RerankEndpoint and RerankAPIKey are optional; they fall back to the
+	// embedding settings, then to the chat endpoint and key — so a rerank
+	// service hosted next to the embeddings needs no extra configuration,
+	// while a separate provider (Jina, Cohere, …) just fills these in.
+	RerankEndpoint string `yaml:"rerank_endpoint" json:"rerank_endpoint"`
+	RerankAPIKey   string `yaml:"rerank_api_key" json:"rerank_api_key"`
+	// RerankModel optionally enables a rerank pass over retrieval candidates
+	// (Cohere-format POST /rerank via rosetta). Empty disables rerank;
+	// retrieval then keeps plain vector order.
+	RerankModel string `yaml:"rerank_model" json:"rerank_model"`
 	// MaxTokens bounds one completion. Leaving it unset lets providers apply their
 	// own small default, which silently truncates long structured answers.
 	MaxTokens int `yaml:"max_tokens" json:"max_tokens"`
@@ -93,6 +103,22 @@ func (c *LLMConfig) ResolvedEmbedAPIKey() string {
 		return c.EmbedAPIKey
 	}
 	return c.APIKey
+}
+
+// ResolvedRerankEndpoint falls back to the embedding endpoint, then to the
+// chat endpoint — matching how the rerank credentials resolve.
+func (c *LLMConfig) ResolvedRerankEndpoint() string {
+	if c.RerankEndpoint != "" {
+		return c.RerankEndpoint
+	}
+	return c.ResolvedEmbedEndpoint()
+}
+
+func (c *LLMConfig) ResolvedRerankAPIKey() string {
+	if c.RerankAPIKey != "" {
+		return c.RerankAPIKey
+	}
+	return c.ResolvedEmbedAPIKey()
 }
 
 func Load(path string) (*Config, error) {

@@ -30,12 +30,16 @@ type PrivacyInfo struct {
 }
 
 type ConfigHandler struct {
-	cfg        *config.Config
+	cfg *config.Config
+	// llm is the same pointer the services hold. Update mutates through it —
+	// replacing cfg.LLM wholesale would leave every service reading the stale
+	// previous copy and "saved, takes effect immediately" would be a lie.
+	llm        *config.LLMConfig
 	configPath string
 }
 
 func NewConfigHandler(cfg *config.Config, configPath string) *ConfigHandler {
-	return &ConfigHandler{cfg: cfg, configPath: configPath}
+	return &ConfigHandler{cfg: cfg, llm: &cfg.LLM, configPath: configPath}
 }
 
 func (h *ConfigHandler) privacy() PrivacyInfo {
@@ -61,8 +65,8 @@ func (h *ConfigHandler) Get(c echo.Context) error {
 	})
 }
 
-// Update replaces the llm block. Services hold a pointer into cfg.LLM, so the new
-// values take effect without a restart.
+// Update rewrites the llm block in place through the pointer the services
+// hold, so the new values take effect without a restart.
 func (h *ConfigHandler) Update(c echo.Context) error {
 	var req config.LLMConfig
 	if err := c.Bind(&req); err != nil {
@@ -78,20 +82,20 @@ func (h *ConfigHandler) Update(c echo.Context) error {
 		req.Protocol = "openai"
 	}
 	if req.EmbedDim == 0 {
-		req.EmbedDim = h.cfg.LLM.EmbedDim
+		req.EmbedDim = h.llm.EmbedDim
 	}
 	// async_extract and allow_remote are config.yaml-only switches: the
 	// settings page does not send them, and a PUT that omits them must not
 	// silently flip pipeline mode or reopen the data boundary. Edit
 	// config.yaml to change them.
-	req.AsyncExtract = h.cfg.LLM.AsyncExtract
-	req.AllowRemote = h.cfg.LLM.AllowRemote
+	req.AsyncExtract = h.llm.AsyncExtract
+	req.AllowRemote = h.llm.AllowRemote
 
 	// Stored vectors are only meaningful for the embedding model that produced them.
-	reindexRequired := req.EmbedDim != h.cfg.LLM.EmbedDim ||
-		req.EmbedModel != h.cfg.LLM.EmbedModel ||
-		req.ResolvedEmbedEndpoint() != h.cfg.LLM.ResolvedEmbedEndpoint()
-	h.cfg.LLM = req
+	reindexRequired := req.EmbedDim != h.llm.EmbedDim ||
+		req.EmbedModel != h.llm.EmbedModel ||
+		req.ResolvedEmbedEndpoint() != h.llm.ResolvedEmbedEndpoint()
+	*h.llm = req
 
 	data, err := yaml.Marshal(h.cfg)
 	if err != nil {

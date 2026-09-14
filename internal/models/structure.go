@@ -134,17 +134,6 @@ type EventFilter struct {
 	Offset   int
 }
 
-// CoAttendance is a derived "shared experience" pair: two people who appear on
-// the same record. It is never stored as an edge, because attending the same
-// meeting does not mean two people are friends, colleagues or anything else.
-type CoAttendance struct {
-	PersonAID    string `json:"person_a_id"`
-	PersonBID    string `json:"person_b_id"`
-	PersonAName  string `json:"person_a_name"`
-	PersonBName  string `json:"person_b_name"`
-	SharedEvents int    `json:"shared_events"`
-}
-
 // validateDateWindow checks an optional start/end pair, both as YYYY-MM-DD and in
 // order. Empty values mean "unknown", which the schema stores as NULL rather than
 // a fabricated date.

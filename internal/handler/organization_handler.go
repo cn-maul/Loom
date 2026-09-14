@@ -63,14 +63,6 @@ func (h *OrganizationHandler) Restore(c echo.Context) error {
 	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: org})
 }
 
-func (h *OrganizationHandler) GetByID(c echo.Context) error {
-	org, err := h.service.GetByID(c.Param("id"))
-	if err != nil {
-		return respondError(c, err, "READ_FAILED")
-	}
-	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: org})
-}
-
 func (h *OrganizationHandler) Update(c echo.Context) error {
 	var org models.Organization
 	if err := bindJSON(c, &org); err != nil {

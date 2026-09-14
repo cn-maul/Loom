@@ -23,6 +23,8 @@ func (s *OrganizationService) Create(org *models.Organization) error {
 	return s.repo.Create(org)
 }
 
+// GetByID resolves one organisation. Internally it backs position writes;
+// there is no HTTP single-read route.
 func (s *OrganizationService) GetByID(id string) (*models.Organization, error) {
 	return s.repo.GetByID(id)
 }

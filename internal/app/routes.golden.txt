@@ -16,7 +16,6 @@ GET /api/audit
 GET /api/backups
 GET /api/backups/status
 GET /api/config
-GET /api/dashboard/stats
 GET /api/events
 GET /api/events/:id
 GET /api/events/:id/participants
@@ -26,7 +25,6 @@ GET /api/follow-ups/:id
 GET /api/follow-ups/:id/postponements
 GET /api/graph
 GET /api/organizations
-GET /api/organizations/:id
 GET /api/organizations/:id/members
 GET /api/persons
 GET /api/persons/:id
@@ -35,14 +33,9 @@ GET /api/persons/:id/follow-ups
 GET /api/persons/:id/positions
 GET /api/persons/:id/relationships
 GET /api/persons/:id/traits
-GET /api/positions/:id
-GET /api/relationships
-GET /api/relationships/:id
-GET /api/relationships/co-attendance
 GET /api/relationships/types
 GET /api/reports
 GET /api/reports/:id
-GET /api/tasks
 POST /api/advice
 POST /api/advice/:id/adopt
 POST /api/ai/infer-hierarchy
@@ -57,7 +50,6 @@ POST /api/follow-ups/:id/cancel
 POST /api/follow-ups/:id/complete
 POST /api/follow-ups/:id/postpone
 POST /api/follow-ups/:id/wait
-POST /api/maintenance/cleanup
 POST /api/organizations
 POST /api/organizations/:id/archive
 POST /api/organizations/:id/restore

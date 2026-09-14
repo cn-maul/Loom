@@ -33,10 +33,6 @@ func (s *PositionService) Create(pos *models.OrgPosition) (*models.OrgPositionLi
 	return s.repo.GetByID(pos.ID)
 }
 
-func (s *PositionService) GetByID(id string) (*models.OrgPositionLink, error) {
-	return s.repo.GetByID(id)
-}
-
 func (s *PositionService) ListByPerson(personID string) ([]*models.OrgPositionLink, error) {
 	if _, err := s.persons.GetByID(personID); err != nil {
 		if errors.Is(err, models.ErrNotFound) {
