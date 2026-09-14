@@ -187,22 +187,6 @@ export default function Report() {
             })}
           </div>
 
-          {report.changes.length > 0 ? (
-            <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-              <h3 className="mb-2 text-sm font-semibold text-foreground">关系与任职变化（{report.changes.length}）</h3>
-              <ul className="space-y-1.5 text-sm leading-6 text-muted-foreground">
-                {report.changes.map((change) => (
-                  <li key={`${change.kind}-${change.id}-${change.date}`}>
-                    <span className="text-foreground">{change.person_name || '某人'}</span> 于 {change.date}
-                    {{ relationship_started: '建立关系', relationship_ended: '结束关系', position_started: '开始任职', position_ended: '结束任职' }[change.kind] ?? change.kind}
-                    ：{change.description || '身份'}
-                    {change.counterpart_name ? `（对方：${change.counterpart_name}）` : ''}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
           {report.promises.length > 0 ? (
             <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
               <h3 className="mb-2 text-sm font-semibold text-foreground">本期承诺（{report.promises.length}）</h3>

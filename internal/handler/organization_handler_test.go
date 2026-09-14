@@ -15,9 +15,13 @@ import (
 	"relationship/internal/service"
 )
 
+type orgFixture struct {
+	e       *echo.Echo
+	persons *repository.PersonRepo
+}
+
 // organizationAPI wires the organisation routes against a throwaway database.
-// Positions share the database so membership behaviour can be asserted too.
-func organizationAPI(t *testing.T) *echo.Echo {
+func organizationAPI(t *testing.T) *orgFixture {
 	t.Helper()
 	database, err := db.OpenDB(filepath.Join(t.TempDir(), "organization_handler_test.db"))
 	if err != nil {
@@ -28,20 +32,13 @@ func organizationAPI(t *testing.T) *echo.Echo {
 		t.Fatal(err)
 	}
 
-	persons := service.NewPersonService(
-		repository.NewPersonRepo(database),
-		repository.NewVecRepo(database),
-		repository.NewOrganizationRepo(database),
-	)
-	if err := persons.Create(&models.Person{ID: uuid.New().String(), Name: "张总"}); err != nil {
+	personRepo := repository.NewPersonRepo(database)
+	orgRepo := repository.NewOrganizationRepo(database)
+	if err := personRepo.Create(&models.Person{ID: uuid.New().String(), Name: "张总"}); err != nil {
 		t.Fatal(err)
 	}
 
-	orgRepo := repository.NewOrganizationRepo(database)
-	orgService := service.NewOrganizationService(orgRepo)
-	positionService := service.NewPositionService(repository.NewPositionRepo(database), persons, orgService)
-	h := NewOrganizationHandler(orgService)
-	ph := NewPositionHandler(positionService)
+	h := NewOrganizationHandler(service.NewOrganizationService(orgRepo))
 
 	e := echo.New()
 	api := e.Group("/api")
@@ -51,23 +48,7 @@ func organizationAPI(t *testing.T) *echo.Echo {
 	api.POST("/organizations/:id/archive", h.Archive)
 	api.POST("/organizations/:id/restore", h.Restore)
 	api.DELETE("/organizations/:id", h.Delete)
-	api.POST("/persons/:id/positions", ph.Create)
-	api.GET("/organizations/:id/members", ph.ListByOrg)
-	api.PUT("/positions/:id", ph.Update)
-	return e
-}
-
-func decodeOrgs(t *testing.T, resp models.APIResponse) []models.Organization {
-	t.Helper()
-	raw, err := json.Marshal(resp.Data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var orgs []models.Organization
-	if err := json.Unmarshal(raw, &orgs); err != nil {
-		t.Fatalf("decode organizations: %v", err)
-	}
-	return orgs
+	return &orgFixture{e: e, persons: personRepo}
 }
 
 func decodeOrg(t *testing.T, resp models.APIResponse) models.Organization {
@@ -83,92 +64,104 @@ func decodeOrg(t *testing.T, resp models.APIResponse) models.Organization {
 	return org
 }
 
-func TestOrganizationArchiveHidesFromPickers(t *testing.T) {
-	e := organizationAPI(t)
-
-	status, resp := doJSON(t, e, http.MethodPost, "/api/organizations", `{"name":"某某科技","kind":"公司","description":"做社交 app"}`)
-	if status != http.StatusCreated {
-		t.Fatalf("create returned %d: %+v", status, resp.Error)
+func decodeOrgs(t *testing.T, resp models.APIResponse) []models.Organization {
+	t.Helper()
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		t.Fatal(err)
 	}
-	created := decodeOrg(t, resp)
-	if created.Kind != "公司" || created.Description != "做社交 app" {
-		t.Fatalf("created = %+v", created)
+	var orgs []models.Organization
+	if err := json.Unmarshal(raw, &orgs); err != nil {
+		t.Fatalf("decode organizations: %v", err)
 	}
-	id := created.ID
-
-	// Empty description round-trips as an empty string, never the string "null".
-	status, resp = doJSON(t, e, http.MethodPost, "/api/organizations", `{"name":"无名协会"}`)
-	if status != http.StatusCreated {
-		t.Fatalf("create minimal returned %d: %+v", status, resp.Error)
-	}
-	if org := decodeOrg(t, resp); org.Description != "" {
-		t.Fatalf("empty description became %q", org.Description)
-	}
-
-	status, resp = doJSON(t, e, http.MethodPost, "/api/organizations/"+id+"/archive", "")
-	if status != http.StatusOK {
-		t.Fatalf("archive returned %d: %+v", status, resp.Error)
-	}
-	if archived := decodeOrg(t, resp); archived.ArchivedAt == nil {
-		t.Fatalf("archived org must carry a timestamp: %+v", archived)
-	}
-
-	// Default listing is for pickers: archived must be gone.
-	status, resp = doJSON(t, e, http.MethodGet, "/api/organizations", "")
-	if status != http.StatusOK {
-		t.Fatalf("list returned %d", status)
-	}
-	if list := decodeOrgs(t, resp); len(list) != 1 || list[0].ID == id {
-		t.Fatalf("active list should hide the archived org: %+v", list)
-	}
-
-	// The management page asks for everything and separates the states itself.
-	status, resp = doJSON(t, e, http.MethodGet, "/api/organizations?include_archived=true", "")
-	if status != http.StatusOK {
-		t.Fatalf("list all returned %d", status)
-	}
-	if list := decodeOrgs(t, resp); len(list) != 2 {
-		t.Fatalf("include_archived list = %d orgs, want 2", len(list))
-	}
-
-	status, resp = doJSON(t, e, http.MethodPost, "/api/organizations/"+id+"/restore", "")
-	if status != http.StatusOK {
-		t.Fatalf("restore returned %d: %+v", status, resp.Error)
-	}
-	if restored := decodeOrg(t, resp); restored.ArchivedAt != nil {
-		t.Fatalf("restored org must lose the timestamp: %+v", restored)
-	}
-	status, resp = doJSON(t, e, http.MethodGet, "/api/organizations", "")
-	if list := decodeOrgs(t, resp); len(list) != 2 {
-		t.Fatalf("after restore the active list should hold both, got %d", len(list))
-	}
-
-	if status, resp := doJSON(t, e, http.MethodPost, "/api/organizations/ghost/archive", ""); status != http.StatusNotFound {
-		t.Fatalf("archiving an unknown org returned %d: %+v", status, resp.Error)
-	}
+	return orgs
 }
 
-func TestOrganizationValidationAndMembers(t *testing.T) {
-	e := organizationAPI(t)
+func TestOrganizationValidation(t *testing.T) {
+	f := organizationAPI(t)
 
-	if status, _ := doJSON(t, e, http.MethodPost, "/api/organizations", `{"name":"   "}`); status != http.StatusBadRequest {
+	if status, _ := doJSON(t, f.e, http.MethodPost, "/api/organizations", `{"name":"   "}`); status != http.StatusBadRequest {
 		t.Fatalf("blank name returned %d, want 400", status)
 	}
 
-	status, resp := doJSON(t, e, http.MethodPost, "/api/organizations", `{"name":"某某科技"}`)
+	status, resp := doJSON(t, f.e, http.MethodPost, "/api/organizations", `{"name":"某某科技"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("create returned %d", status)
+	}
+	if decodeOrg(t, resp).ID == "" {
+		t.Fatal("created organization has no id")
+	}
+}
+
+// Archive is the reversible path: the organisation leaves every picker, its row
+// and its members survive, and restore brings it back.
+func TestOrganizationArchiveHidesFromPickers(t *testing.T) {
+	f := organizationAPI(t)
+
+	status, resp := doJSON(t, f.e, http.MethodPost, "/api/organizations", `{"name":"某某科技"}`)
 	if status != http.StatusCreated {
 		t.Fatalf("create returned %d", status)
 	}
 	id := decodeOrg(t, resp).ID
 
-	if status, _ := doJSON(t, e, http.MethodGet, "/api/organizations/"+id+"/members", ""); status != http.StatusOK {
-		t.Fatalf("members of a new org returned %d", status)
+	// Attach a person so the "archiving must not detach anyone" claim is real.
+	persons, err := f.persons.ListWithActivity()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if status, _ := doJSON(t, e, http.MethodGet, "/api/organizations/ghost/members", ""); status != http.StatusNotFound {
-		t.Fatalf("members of an unknown org returned %d, want 404", status)
+	person := &models.Person{ID: persons[0].ID, Name: persons[0].Name, OrgID: id}
+	if err := f.persons.Update(person); err != nil {
+		t.Fatal(err)
 	}
 
-	// Membership flows (add / end stint / delete) are covered by the end-to-end
-	// smoke against the real binary; the positions PUT contract is pinned by
-	// position service tests.
+	status, resp = doJSON(t, f.e, http.MethodPost, "/api/organizations/"+id+"/archive", "")
+	if status != http.StatusOK {
+		t.Fatalf("archive returned %d: %+v", status, resp.Error)
+	}
+
+	status, resp = doJSON(t, f.e, http.MethodGet, "/api/organizations", "")
+	if status != http.StatusOK {
+		t.Fatalf("list returned %d", status)
+	}
+	if orgs := decodeOrgs(t, resp); len(orgs) != 0 {
+		t.Fatalf("an archived organization must not be offered as a picker, got %+v", orgs)
+	}
+
+	status, resp = doJSON(t, f.e, http.MethodGet, "/api/organizations?include_archived=true", "")
+	if status != http.StatusOK {
+		t.Fatalf("list with archived returned %d", status)
+	}
+	orgs := decodeOrgs(t, resp)
+	if len(orgs) != 1 || orgs[0].ID != id || orgs[0].ArchivedAt == nil {
+		t.Fatalf("the management list must still show it as archived, got %+v", orgs)
+	}
+
+	// The row survived, so the member keeps their employer.
+	kept, err := f.persons.GetByID(person.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept.OrgID != id {
+		t.Fatalf("archiving must not detach members, got org_id %q", kept.OrgID)
+	}
+
+	status, resp = doJSON(t, f.e, http.MethodPost, "/api/organizations/"+id+"/restore", "")
+	if status != http.StatusOK {
+		t.Fatalf("restore returned %d: %+v", status, resp.Error)
+	}
+	status, resp = doJSON(t, f.e, http.MethodGet, "/api/organizations", "")
+	if status != http.StatusOK {
+		t.Fatalf("list returned %d", status)
+	}
+	if orgs := decodeOrgs(t, resp); len(orgs) != 1 || orgs[0].ArchivedAt != nil {
+		t.Fatalf("a restored organization must be selectable again, got %+v", orgs)
+	}
+
+	// Unknown ids are a 404, not a silent success.
+	if status, _ := doJSON(t, f.e, http.MethodPost, "/api/organizations/ghost/archive", ""); status != http.StatusNotFound {
+		t.Fatalf("archiving an unknown organization returned %d, want 404", status)
+	}
+	if status, _ := doJSON(t, f.e, http.MethodPost, "/api/organizations/ghost/restore", ""); status != http.StatusNotFound {
+		t.Fatalf("restoring an unknown organization returned %d, want 404", status)
+	}
 }

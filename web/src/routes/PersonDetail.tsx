@@ -210,7 +210,7 @@ export default function PersonDetail() {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        {/* —— 左 2/3：概览、关系、时间线 —— */}
+        {/* —— 左 2/3：概览与时间线 —— */}
         <div className="min-w-0 space-y-5">
           <SectionCard
             title="人物概览"

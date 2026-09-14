@@ -12,11 +12,9 @@ import type {
   EventParticipant,
   FollowUp,
   FollowUpPostponement,
-  GraphData,
   IngestResult,
   LLMConfig,
   Organization,
-  OrgPositionLink,
   Person,
   PersonListParams,
   PersonWithActivity,
@@ -24,8 +22,6 @@ import type {
   Report,
   ReportRequest,
   ReportSnapshot,
-  Relationship,
-  RelationshipLink,
   Trait,
 } from './types';
 
@@ -148,35 +144,11 @@ export const organizationApi = {
   create: (org: Partial<Organization>) => request<Organization>('/organizations', { method: 'POST', body: JSON.stringify(org) }),
   update: (id: string, org: Partial<Organization>) =>
     request<Organization>(`/organizations/${id}`, { method: 'PUT', body: JSON.stringify(org) }),
-  archive: (id: string) => request<Organization>(`/organizations/${id}/archive`, { method: 'POST' }),
-  restore: (id: string) => request<Organization>(`/organizations/${id}/restore`, { method: 'POST' }),
+  // Archive is the reversible path: the organisation stops being offered in
+  // pickers but keeps its row, so nobody loses their employer.
+  archive: (id: string) => request<null>(`/organizations/${id}/archive`, { method: 'POST' }),
+  restore: (id: string) => request<null>(`/organizations/${id}/restore`, { method: 'POST' }),
   delete: (id: string) => request<null>(`/organizations/${id}`, { method: 'DELETE' }),
-  members: (id: string, currentOnly?: boolean) =>
-    request<OrgPositionLink[]>(`/organizations/${id}/members${currentOnly ? '?current=true' : ''}`),
-  addMember: (personId: string, pos: { org_id: string; role?: string; start_date?: string }) =>
-    request<OrgPositionLink>(`/persons/${personId}/positions`, { method: 'POST', body: JSON.stringify(pos) }),
-  // The positions PUT replaces the whole stint, so person/org/role must travel
-  // along with the new end_date rather than being patched.
-  endMembership: (pos: OrgPositionLink, endDate: string) =>
-    request<OrgPositionLink>(`/positions/${pos.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        person_id: pos.person_id,
-        org_id: pos.org_id,
-        role: pos.role,
-        start_date: pos.start_date,
-        end_date: endDate,
-        notes: pos.notes,
-      }),
-    }),
-  removeMembership: (positionId: string) => request<null>(`/positions/${positionId}`, { method: 'DELETE' }),
-};
-
-export const positionApi = {
-  /** Full stint history for one person, current postings first. */
-  byPerson: (personId: string) => request<OrgPositionLink[]>(`/persons/${personId}/positions`),
-  create: (personId: string, pos: { org_id: string; role?: string; start_date?: string; end_date?: string; notes?: string }) =>
-    request<OrgPositionLink>(`/persons/${personId}/positions`, { method: 'POST', body: JSON.stringify(pos) }),
 };
 
 export const eventApi = {
@@ -226,13 +198,6 @@ export const aiApi = {
   embeddingStatus: () => request<{ available: boolean }>('/ai/embeddings/status'),
   // 端点的 /models 目录（后端经 rosetta 探测）。请求前应先保存配置。
   models: () => request<string[]>('/ai/models'),
-  // 按职位推断上下级：生成 confirmed=0 的「上级」边，不覆盖已有关系。
-  // orgId 省略时扫描全部组织。
-  inferHierarchy: (orgId?: string) =>
-    request<{ created: number; links: RelationshipLink[] }>('/ai/infer-hierarchy', {
-      method: 'POST',
-      body: JSON.stringify(orgId ? { org_id: orgId } : {}),
-    }),
 };
 
 // Reports are snapshots: generating stores one, and the history serves every
@@ -307,22 +272,4 @@ export const configApi = {
 // whole-dataset exports — newest first.
 export const auditApi = {
   list: (limit = 100) => request<AuditList>(`/audit?limit=${limit}`),
-};
-
-// The graph endpoint ships the whole canvas in one payload; filtering happens
-// client-side because the dataset is personal-CRM sized.
-export const graphApi = {
-  get: () => request<GraphData>('/graph'),
-};
-
-export const relationshipApi = {
-  types: () => request<string[]>('/relationships/types'),
-  /** active=true keeps only the relationships that have not ended yet. */
-  byPerson: (personId: string, active?: boolean) =>
-    request<RelationshipLink[]>(`/persons/${personId}/relationships${active ? '?active=true' : ''}`),
-  create: (rel: Partial<Relationship>) =>
-    request<Relationship>('/relationships', { method: 'POST', body: JSON.stringify(rel) }),
-  update: (id: string, rel: Partial<Relationship>) =>
-    request<Relationship>(`/relationships/${id}`, { method: 'PUT', body: JSON.stringify(rel) }),
-  remove: (id: string) => request<null>(`/relationships/${id}`, { method: 'DELETE' }),
 };

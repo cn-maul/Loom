@@ -25,14 +25,6 @@ const (
 	ReportCompleted   = "completed"
 )
 
-// Kinds of change the report can cite from the relationship graph.
-const (
-	ReportRelationshipStarted = "relationship_started"
-	ReportRelationshipEnded   = "relationship_ended"
-	ReportPositionStarted     = "position_started"
-	ReportPositionEnded       = "position_ended"
-)
-
 // MaxReportSpanDays bounds one report. Past a year this stops being a report
 // and becomes an export, which is a different feature with different rules.
 const MaxReportSpanDays = 366
@@ -155,21 +147,6 @@ type ReportPromise struct {
 	Deadline   string `json:"deadline"`
 }
 
-// ReportChangeRef is one change to the relationship graph or an organisation
-// posting inside the period.
-type ReportChangeRef struct {
-	Kind       string `json:"kind"`
-	ID         string `json:"id"`
-	PersonID   string `json:"person_id"`
-	PersonName string `json:"person_name"`
-	// CounterpartID is the other end of the change: the other person for a
-	// relationship edge, the organisation for a posting.
-	CounterpartID   string `json:"counterpart_id"`
-	CounterpartName string `json:"counterpart_name"`
-	Description     string `json:"description"`
-	Date            string `json:"date"`
-}
-
 // ReportPersonSummary groups the period per person, which is what makes "who
 // needs attention" readable without scrolling the whole timeline.
 type ReportPersonSummary struct {
@@ -209,8 +186,7 @@ type Report struct {
 	Upcoming []ReportFollowUpRef `json:"upcoming"`
 	// Closed inside the period, so the report shows outcomes and not only debt.
 	Completed []ReportFollowUpRef `json:"completed"`
-	// 5. What changed on the graph, and what was recorded.
-	Changes  []ReportChangeRef     `json:"changes"`
+	// 5. What was recorded.
 	Events   []ReportEventRef      `json:"events"`
 	Promises []ReportPromise       `json:"promises"`
 	Persons  []ReportPersonSummary `json:"persons"`
@@ -224,7 +200,7 @@ type Report struct {
 // empty period is answered locally instead of asking a model to write prose
 // about nothing, which is how a report invents a busy week.
 func (r *Report) HasFindings() bool {
-	return r.EventCount > 0 || r.OpenCount > 0 || len(r.Changes) > 0 ||
+	return r.EventCount > 0 || r.OpenCount > 0 ||
 		len(r.Completed) > 0 || len(r.Promises) > 0
 }
 

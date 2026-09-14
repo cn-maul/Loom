@@ -58,16 +58,12 @@ pwsh scripts/drill.ps1
 
 | 对象 | 机制 | 说明 |
 |---|---|---|
-| 孤儿向量 | 每次启动自动清理 + `POST /api/maintenance/cleanup` | 删除 person/event/trait 已不存在的 `vec_memory` 行；未知 chunk 类型不动 |
+| 孤儿向量 | 每次启动自动清理 | 删除 person/event/trait 已不存在的 `vec_memory` 行；未知 chunk 类型不动 |
 | 审计日志 | `maintenance.audit_retention_days`（默认 0 = 永久保留） | 显式配置后按窗口修剪；安全证据默认不清 |
 | 失败提取任务 | 无需清理 | 队列历史自剪 500 条上限；失败记录保留原文——原文是事实 |
 | 备份堆积 | `backup.keep` 保留个数 | 调度器自动滚动删除最旧快照 |
 
-手动触发清理并查看报告：
-
-```
-curl -X POST http://127.0.0.1:8080/api/maintenance/cleanup
-```
+清理没有手动入口：只在启动时执行一遍，报告写进启动日志（`startup maintenance: removed N orphan vector(s), M expired audit row(s)`）。需要立刻清理就重启进程。
 
 ## 六、演进边界（重申）
 

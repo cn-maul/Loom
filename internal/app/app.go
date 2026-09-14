@@ -28,21 +28,18 @@ type App struct {
 	VecReady bool
 	ingest   *service.IngestService
 
-	personHandler       *handler.PersonHandler
-	eventHandler        *handler.EventHandler
-	traitHandler        *handler.TraitHandler
-	aiHandler           *handler.AIHandler
-	configHandler       *handler.ConfigHandler
-	orgHandler          *handler.OrganizationHandler
-	followUpHandler     *handler.FollowUpHandler
-	relationshipHandler *handler.RelationshipHandler
-	positionHandler     *handler.PositionHandler
-	graphHandler        *handler.GraphHandler
-	adviceHandler       *handler.AdviceHandler
-	reportHandler       *handler.ReportHandler
-	backupHandler       *handler.BackupHandler
-	auditHandler        *handler.AuditHandler
-	backupSvc           *backup.Service
+	personHandler   *handler.PersonHandler
+	eventHandler    *handler.EventHandler
+	traitHandler    *handler.TraitHandler
+	aiHandler       *handler.AIHandler
+	configHandler   *handler.ConfigHandler
+	orgHandler      *handler.OrganizationHandler
+	followUpHandler *handler.FollowUpHandler
+	adviceHandler   *handler.AdviceHandler
+	reportHandler   *handler.ReportHandler
+	backupHandler   *handler.BackupHandler
+	auditHandler    *handler.AuditHandler
+	backupSvc       *backup.Service
 }
 
 // New opens the database, runs migrations and wires every layer. It returns an
@@ -103,18 +100,13 @@ func (a *App) wire(database *sql.DB) error {
 	}
 	orgService := service.NewOrganizationService(orgRepo)
 	eventService := service.NewEventService(eventRepo, vecRepo, personService, traitRepo)
-	aiService := service.NewAIService(&cfg.LLM, vecRepo, traitRepo, eventRepo, personRepo,
-		repository.NewRelationshipRepo(database), repository.NewPositionRepo(database), aiClient)
+	aiService := service.NewAIService(&cfg.LLM, vecRepo, traitRepo, eventRepo, personRepo, aiClient)
 	ingestService := service.NewIngestService(aiService, &cfg.LLM)
 	a.ingest = ingestService
 	followUpService := service.NewFollowUpService(followUpRepo, personService, eventRepo)
-	relationshipService := service.NewRelationshipService(repository.NewRelationshipRepo(database), personService, eventService)
-	positionService := service.NewPositionService(repository.NewPositionRepo(database), personService, orgService)
-	graphService := service.NewGraphService(personRepo, repository.NewGraphRepo(database))
 	adviceService := service.NewAdviceService(repository.NewAdviceRepo(database), eventRepo, followUpRepo, personService, aiService)
 	reportService := service.NewReportService(
 		repository.NewReportRepo(database), eventRepo, followUpRepo,
-		repository.NewRelationshipRepo(database), repository.NewPositionRepo(database),
 		personService, aiService,
 	)
 
@@ -125,9 +117,6 @@ func (a *App) wire(database *sql.DB) error {
 	a.configHandler = handler.NewConfigHandler(cfg, a.CfgPath)
 	a.orgHandler = handler.NewOrganizationHandler(orgService)
 	a.followUpHandler = handler.NewFollowUpHandler(followUpService)
-	a.relationshipHandler = handler.NewRelationshipHandler(relationshipService)
-	a.positionHandler = handler.NewPositionHandler(positionService)
-	a.graphHandler = handler.NewGraphHandler(graphService)
 	a.adviceHandler = handler.NewAdviceHandler(adviceService)
 	a.reportHandler = handler.NewReportHandler(reportService)
 

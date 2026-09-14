@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageSquareText, Share2 } from 'lucide-react';
+import { MessageSquareText } from 'lucide-react';
 import AdvicePanel from '../components/AdvicePanel';
 import PersonPicker from '../components/PersonPicker';
 import { ErrorNote, Spinner, controlClass } from '../components/ui';
@@ -8,9 +8,9 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
-import { adviceApi, organizationApi, personApi, positionApi, relationshipApi } from '../api/client';
+import { adviceApi, organizationApi, personApi } from '../api/client';
 import { PageHeader, SectionCard } from '../components/layout';
-import type { AdviceSession, OrgPositionLink, Organization, PersonWithActivity, RelationshipLink } from '../api/types';
+import type { AdviceSession, Organization, PersonWithActivity } from '../api/types';
 import { relativeTime } from '../format';
 
 export default function Advice() {
@@ -27,12 +27,6 @@ export default function Advice() {
   const [advice, setAdvice] = useState<AdviceSession | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-
-  // Structured context: what the AI is about to read. It is shown as a fact
-  // panel so the user can see (and correct) the relationship/position inputs
-  // before asking, instead of wondering whether the answer knows them.
-  const [relationships, setRelationships] = useState<RelationshipLink[]>([]);
-  const [positions, setPositions] = useState<OrgPositionLink[]>([]);
 
   useEffect(() => {
     personApi
@@ -60,25 +54,13 @@ export default function Advice() {
     }
   }, []);
 
-  const loadStructure = useCallback(async (id: string) => {
-    if (!id) {
-      setRelationships([]);
-      setPositions([]);
-      return;
-    }
-    const [rels, pos] = await Promise.all([relationshipApi.byPerson(id), positionApi.byPerson(id)]);
-    setRelationships(rels);
-    setPositions(pos);
-  }, []);
-
   // Switching person must not leave the previous person's answer on screen: the
   // evidence list would silently describe someone else.
   useEffect(() => {
     setAdvice(null);
     setError('');
     void loadHistory(personId);
-    void loadStructure(personId).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-  }, [personId, loadHistory, loadStructure]);
+  }, [personId, loadHistory]);
 
   const ask = async () => {
     const text = question.trim();
@@ -122,11 +104,10 @@ export default function Advice() {
 
   const selectablePersons = orgFilter === 'none' ? persons.filter((p) => !p.org_id) : orgFilter ? persons.filter((p) => p.org_id === orgFilter) : persons;
   const personName = persons.find((person) => person.id === personId)?.name ?? '';
-  const currentPositions = positions.filter((p) => !p.end_date);
 
   return (
     <div>
-      <PageHeader title="问一问" description="基于画像、相关记录和你标注的关系与组织，给出逐条有依据的沟通建议" />
+      <PageHeader title="问一问" description="基于画像和相关记录，给出逐条有依据的沟通建议" />
 
       <div className="grid gap-5 lg:grid-cols-[19rem_minmax(0,1fr)]">
         {/* Left: the person's past questions, conversation style. */}
@@ -163,54 +144,6 @@ export default function Advice() {
               </ul>
             )}
           </SectionCard>
-
-          <SectionCard title="AI 会读到的关系与组织" bodyClassName="p-3">
-            <div className="space-y-2 text-xs leading-5 text-muted-foreground">
-              {relationships.length === 0 && currentPositions.length === 0 ? (
-                <p>
-                  还没有关系边或任职记录。去
-                  <Link to="/relationships" className="mx-1 text-primary hover:underline">关系图谱</Link>
-                  或人物详情页补上，AI 才会知道「TA 是你的上级 / 同事」这类立场。
-                </p>
-              ) : null}
-
-              {relationships.length > 0 ? (
-                <div>
-                  <p className="mb-1 flex items-center gap-1 font-medium text-foreground">
-                    <Share2 className="size-3.5" /> 关系
-                  </p>
-                  <ul className="space-y-1">
-                    {relationships.map((rel) => {
-                      const outgoing = rel.from_person_id === personId;
-                      const other = outgoing ? rel.to_person_name : rel.from_person_name;
-                      const arrow = rel.direction === 'undirected' ? '—' : outgoing ? '→' : '←';
-                      return (
-                        <li key={rel.id}>
-                          <span className="text-foreground">{personName}</span> {arrow} {other}
-                          <span className="ml-1 rounded bg-muted px-1.5 py-0.5">{rel.relation_type}</span>
-                          {rel.confirmed ? null : <span className="ml-1 text-amber-600 dark:text-amber-400">未确认</span>}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ) : null}
-
-              {currentPositions.length > 0 ? (
-                <div className="mt-2">
-                  <p className="mb-1 font-medium text-foreground">现任组织与职位</p>
-                  <ul className="space-y-1">
-                    {currentPositions.map((pos) => (
-                      <li key={pos.id}>
-                        {pos.org_name}
-                        {pos.role ? `（${pos.role}）` : ''}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-          </SectionCard>
         </aside>
 
         {/* Right: ask + the active answer. */}
@@ -238,7 +171,6 @@ export default function Advice() {
                 ))}
               </select>
               <PersonPicker persons={selectablePersons} value={personId} onChange={setPersonId} placeholder="选择要咨询的人物" />
-              <span className="text-xs text-muted-foreground">左侧是这次回答会使用的结构化关系背景</span>
             </div>
 
             <Textarea

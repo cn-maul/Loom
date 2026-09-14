@@ -63,28 +63,6 @@ func (h *AIHandler) ListModels(c echo.Context) error {
 	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: ids})
 }
 
-// InferHierarchy asks the model to propose superior/subordinate edges from
-// organisation postings. Edges land unconfirmed (confirmed=0) and existing
-// open edges are never duplicated. Body {org_id} is optional; empty scans all.
-func (h *AIHandler) InferHierarchy(c echo.Context) error {
-	var req struct {
-		OrgID string `json:"org_id"`
-	}
-	_ = c.Bind(&req) // body is optional; a missing body just means "scan all"
-
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 10*time.Minute)
-	defer cancel()
-
-	links, err := h.aiService.InferHierarchy(ctx, req.OrgID)
-	if err != nil {
-		return serverError(c, "INFER_HIERARCHY_FAILED", err.Error())
-	}
-	return c.JSON(http.StatusOK, models.APIResponse{
-		OK:   true,
-		Data: map[string]interface{}{"created": len(links), "links": links},
-	})
-}
-
 func badRequest(c echo.Context, code, message string) error {
 	return c.JSON(http.StatusBadRequest, models.APIResponse{
 		OK:    false,

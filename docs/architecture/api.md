@@ -6,10 +6,15 @@
   迁往 `/api/v2/...` 并保留 v1 一个弃用期。路由表面由
   `internal/app/routes.golden.txt` 固定（`internal/app` 契约测试自动校验，
   `LOOM_UPDATE_GOLDEN=1` 重新生成）。
-- 认证：`server.auth_token` 非空时，所有 `/api` 路由要求 `X-Auth-Token` / `Authorization: Bearer <token>` / `?token=`；未携带返回 401。SPA 静态资源不设防。
+- 认证：`server.auth_token` 非空时，所有 `/api` 路由要求 `X-Auth-Token` / `Authorization: Bearer <token>` / `?token=`；未携带返回 401。SPA 静态资源不设防。未匹配的 `/api` 路径属于兜底路由、不在认证组内，未带令牌也直接返回 404——它不暴露任何数据，只说明路径写错了。
 - 分页约定：`limit` / `offset` 查询参数；匹配总数放 `X-Total-Count` 响应头；`limit<=0`
   表示不分页（全量返回）。显式 `limit` 超过 500 会被钳制到 500（`MaxPageLimit`）。
 - 错误约定：统一 JSON `{ok, data, error:{code,message}}`；错误码见 `internal/models/errors.go`。
+  `/api` 下**任何**失败都走这个包络，包括 Echo 自己产生的失败：未匹配的路径 404 `NOT_FOUND`、
+  路径存在但方法不支持 405 `METHOD_NOT_ALLOWED`（`Allow` 头照常列出可用方法）、请求体被拒
+  400 `INVALID_INPUT`、panic 被 Recover 兜成 500 `INTERNAL`。5xx 只回固定文案，不回显
+  内部错误。判定顺序：先看路径是否存在，再看方法——`PATCH /api/persons` 是 405，
+  `POST /api/persons-typo` 是 404，不会因为兜底路由的存在而混淆。
 - 慢请求：任一请求超过 15 秒写一条 warning 日志（method/path/状态/耗时）——同步 AI
   端点慢是预期，日志抓的是意外。
 
@@ -22,10 +27,10 @@ GET    /api/persons/:id                详情（含 traits）
 PUT    /api/persons/:id                更新
 DELETE /api/persons/:id                删除（级联）
 POST   /api/organizations              创建组织
-GET    /api/organizations              组织列表
+GET    /api/organizations              组织列表（include_archived=true 才含已归档）
 PUT    /api/organizations/:id          更新
-POST   /api/organizations/:id/archive  归档
-POST   /api/organizations/:id/restore  恢复
+POST   /api/organizations/:id/archive  归档（选择框不再出现，成员归属保留）
+POST   /api/organizations/:id/restore  取消归档
 DELETE /api/organizations/:id          删除
 ```
 
@@ -44,22 +49,13 @@ POST   /api/events/:id/extract                  重试提取（人工修订过�
 GET    /api/persons/:id/events                  该人物时间线
 ```
 
-## 关系、任职与图谱
+## 关系与任职（已移除）
 
-```
-POST   /api/relationships                       创建关系边
-GET    /api/relationships/types                 已用关系类型
-PUT    /api/relationships/:id                   更新
-DELETE /api/relationships/:id                   删除
-GET    /api/persons/:id/relationships           某人的关系
-GET    /api/graph                               全图（?limit= 人物节点上限，默认1000、硬上限5000；
-                                                超出时 nodes_total/truncated 明示截断；含共同经历派生对）
-POST   /api/persons/:id/positions               新增任职
-GET    /api/persons/:id/positions               任职历史
-GET    /api/organizations/:id/members           成员（current=true 现任筛选）
-PUT    /api/positions/:id                       更新（写 end_date 即离任）
-DELETE /api/positions/:id                       删除
-```
+关系边（`/api/relationships`、`/api/persons/:id/relationships`）与结构化任职
+（`/api/persons/:id/positions`、`/api/organizations/:id/members`、`/api/positions/:id`）
+两组端点连同前端页面一并删除，没有替代端点。人物档案上的 `position` 字段仍是自由
+文本，由人物表单直接读写；数据库里的 `person_relationships` / `person_org_positions`
+两张表保留（历史数据不迁移、不删除），但没有任何功能再读写它们。
 
 ## 画像与 AI 工具
 
@@ -67,8 +63,6 @@ DELETE /api/positions/:id                       删除
 GET    /api/persons/:id/traits                  画像列表
 PUT    /api/traits/:id/verify                   标记准确/不准确
 POST   /api/ai/reindex                          重建向量索引
-POST   /api/ai/infer-hierarchy                  按职位 AI 推断上下级（body {org_id} 可选；生成 confirmed=0 的「上级」边，
-                                                不覆盖已存在的有效关系；返回 {created, links}）
 GET    /api/ai/embeddings/status                向量索引状态
 GET    /api/ai/models                           对话端点的模型目录（string[]，经 rosetta 探测 /models，用当前已保存配置）
 GET    /api/config                              配置 + privacy 面板（{config, privacy}）
@@ -161,3 +155,5 @@ DELETE /api/reports/:id                         删除快照
 ## 静态资源
 
 `GET /*` 命中嵌入的前端构建产物；未命中文件时回退 `index.html`（SPA 路由）。
+`/api` 前缀是例外：那里没有页面可回退，未匹配的 `/api/*` 一律 404 JSON 包络，
+不会被这个兜底路由变成 200 + HTML。

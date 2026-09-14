@@ -30,6 +30,11 @@ func (a *App) NewRouter() (*echo.Echo, error) {
 
 	a.registerAPI(e)
 
+	// Errors Echo raises itself — an unrouted /api path, a verb its route does
+	// not implement — must speak the same envelope as a handler failure.
+	// Built after registerAPI so the route table is complete.
+	e.HTTPErrorHandler = apiErrorHandler(e, newRouteShapes(e))
+
 	if err := a.serveFrontend(e); err != nil {
 		return nil, err
 	}
@@ -38,8 +43,7 @@ func (a *App) NewRouter() (*echo.Echo, error) {
 
 // registerAPI maps every HTTP route to its handler. Route grouping follows the
 // domain order used across the codebase: people and organisations first, then
-// records, structured relations, profile utilities, advice, follow-ups and
-// reports.
+// records, profile utilities, advice, follow-ups and reports.
 func (a *App) registerAPI(e *echo.Echo) {
 	// Auth is group-scoped: the token guards /api only, so the embedded SPA
 	// still loads and can ask the user for the token.
@@ -78,26 +82,12 @@ func (a *App) registerAPI(e *echo.Echo) {
 	api.POST("/events/:id/extract", a.eventHandler.RetryExtract)
 	api.GET("/persons/:id/events", a.eventHandler.ListByPerson)
 
-	// Structured relationships and organisation postings.
-	api.POST("/relationships", a.relationshipHandler.Create)
-	api.GET("/relationships/types", a.relationshipHandler.ListTypes)
-	api.PUT("/relationships/:id", a.relationshipHandler.Update)
-	api.DELETE("/relationships/:id", a.relationshipHandler.Delete)
-	api.GET("/persons/:id/relationships", a.relationshipHandler.ListByPerson)
-	api.GET("/graph", a.graphHandler.Get)
-	api.POST("/persons/:id/positions", a.positionHandler.Create)
-	api.GET("/persons/:id/positions", a.positionHandler.ListByPerson)
-	api.GET("/organizations/:id/members", a.positionHandler.ListByOrg)
-	api.PUT("/positions/:id", a.positionHandler.Update)
-	api.DELETE("/positions/:id", a.positionHandler.Delete)
-
 	// Person profile and AI utilities.
 	api.GET("/persons/:id/traits", a.traitHandler.ListByPerson)
 	api.PUT("/traits/:id/verify", a.traitHandler.Verify)
 	api.POST("/ai/reindex", a.aiHandler.Reindex)
 	api.GET("/ai/embeddings/status", a.aiHandler.EmbeddingStatus)
 	api.GET("/ai/models", a.aiHandler.ListModels)
-	api.POST("/ai/infer-hierarchy", a.aiHandler.InferHierarchy)
 	api.GET("/config", a.configHandler.Get)
 	api.PUT("/config", a.configHandler.Update)
 
@@ -137,7 +127,9 @@ func (a *App) registerAPI(e *echo.Echo) {
 }
 
 // serveFrontend exposes the embedded build and falls back to index.html so the
-// single binary can be started from any directory.
+// single binary can be started from any directory. /api is excluded from that
+// fallback: an API path with no route is a client bug, and answering it with
+// the app shell hides the mistake behind a 200 and a body nothing can parse.
 func (a *App) serveFrontend(e *echo.Echo) error {
 	frontendFS, err := frontend.GetFS()
 	if err != nil {
@@ -150,6 +142,9 @@ func (a *App) serveFrontend(e *echo.Echo) error {
 	}
 
 	e.GET("/*", func(c echo.Context) error {
+		if isAPIPath(c.Request().URL.Path) {
+			return respondAPIError(c, http.StatusNotFound)
+		}
 		name := strings.TrimPrefix(c.Request().URL.Path, "/")
 		if name == "" {
 			return c.HTML(http.StatusOK, string(index))

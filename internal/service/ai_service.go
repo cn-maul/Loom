@@ -22,8 +22,6 @@ type AIService struct {
 	traitRepo  *repository.TraitRepo
 	eventRepo  *repository.EventRepo
 	personRepo *repository.PersonRepo
-	relRepo    *repository.RelationshipRepo
-	posRepo    *repository.PositionRepo
 	client     *ai.Client
 }
 
@@ -33,8 +31,6 @@ func NewAIService(
 	traitRepo *repository.TraitRepo,
 	eventRepo *repository.EventRepo,
 	personRepo *repository.PersonRepo,
-	relRepo *repository.RelationshipRepo,
-	posRepo *repository.PositionRepo,
 	client *ai.Client,
 ) *AIService {
 	return &AIService{
@@ -43,8 +39,6 @@ func NewAIService(
 		traitRepo:  traitRepo,
 		eventRepo:  eventRepo,
 		personRepo: personRepo,
-		relRepo:    relRepo,
-		posRepo:    posRepo,
 		client:     client,
 	}
 }
@@ -358,204 +352,6 @@ func (s *AIService) indexTrait(ctx context.Context, trait *models.Trait) error {
 	return s.vecRepo.Insert(traitVectorID(trait.ID), embedding, trait.PersonID, "trait", trait.ID)
 }
 
-// hierarchyPair is one proposed superior→subordinate edge from the model.
-type hierarchyPair struct {
-	Superior    string `json:"superior"`
-	Subordinate string `json:"subordinate"`
-	Reason      string `json:"reason"`
-}
-
-const hierarchyPrompt = `你在为个人关系管理系统推断组织内的上下级关系。下面是一个组织的在职成员与职位。请根据职位名称推断直接上下级对：
-- 只输出有把握的直接上下级（如 主任→干事、经理→专员），拿不准的不要输出；
-- 不要输出同级之间的边，也不要在完全没有职位线索时硬凑；
-- superior 是上级姓名，subordinate 是下级姓名，必须使用列表中的原名，不要改写；
-- 只返回 JSON：{"pairs":[{"superior":"...","subordinate":"...","reason":"一句话理由"}]}，没有就返回 {"pairs":[]}。
-
-成员列表：
-%s`
-
-// InferHierarchy asks the model to propose direct superior/subordinate edges
-// from each organisation's current postings, then stores them as unconfirmed
-// 上级 edges. Existing open edges between a pair (any type, either direction)
-// are never duplicated or overridden: inference supplements, it does not
-// overwrite facts the user recorded by hand. An empty orgID scans every
-// organisation with at least two current members.
-func (s *AIService) InferHierarchy(ctx context.Context, orgID string) ([]*models.RelationshipLink, error) {
-	positions, err := s.posRepo.ListAll()
-	if err != nil {
-		return nil, fmt.Errorf("list positions: %w", err)
-	}
-	type member struct{ id, name, role string }
-	rosters := map[string][]member{}
-	orgNames := map[string]string{}
-	for _, p := range positions {
-		if p.EndDate != "" {
-			continue
-		}
-		if orgID != "" && p.OrgID != orgID {
-			continue
-		}
-		rosters[p.OrgID] = append(rosters[p.OrgID], member{id: p.PersonID, name: p.PersonName, role: p.Role})
-		orgNames[p.OrgID] = p.OrgName
-	}
-
-	created := []*models.RelationshipLink{}
-	for id, members := range rosters {
-		if len(members) < 2 {
-			continue
-		}
-		lines := make([]string, 0, len(members))
-		idsByName := map[string][]string{}
-		for _, m := range members {
-			lines = append(lines, fmt.Sprintf("%s（%s）", m.name, m.role))
-			idsByName[m.name] = append(idsByName[m.name], m.id)
-		}
-
-		resp, err := s.client.Chat(ctx, s.cfg.ExtractModel, []ai.Message{
-			ai.System(fmt.Sprintf(hierarchyPrompt, joinOr(lines, "\n"))),
-			ai.User("请推断这个组织的上下级关系"),
-		}, ai.ChatOptions{JSONMode: true, Temperature: 0.2, MaxTokens: 1500})
-		if err != nil {
-			log.Printf("warning: infer hierarchy for %s: %v", orgNames[id], err)
-			continue
-		}
-		var payload struct {
-			Pairs []hierarchyPair `json:"pairs"`
-		}
-		if err := parseJSON(resp, &payload); err != nil {
-			log.Printf("warning: parse hierarchy pairs for %s: %v (%s)", orgNames[id], err, truncate(resp, 200))
-			continue
-		}
-
-		for _, pair := range payload.Pairs {
-			fromIDs, fromOK := idsByName[strings.TrimSpace(pair.Superior)]
-			toIDs, toOK := idsByName[strings.TrimSpace(pair.Subordinate)]
-			// 重名时不猜：同名成员无法确定指谁，宁可漏掉也不建错边。
-			if !fromOK || !toOK || len(fromIDs) > 1 || len(toIDs) > 1 || fromIDs[0] == toIDs[0] {
-				continue
-			}
-			if s.activeEdgeExists(fromIDs[0], toIDs[0]) {
-				continue
-			}
-			rel := &models.Relationship{
-				FromPersonID: fromIDs[0],
-				ToPersonID:   toIDs[0],
-				RelationType: "上级",
-				Direction:    models.DirectionDirected,
-				Confirmed:    0,
-				Notes:        fmt.Sprintf("AI 按职位推断（%s）：%s", orgNames[id], pair.Reason),
-			}
-			if err := rel.Validate(); err != nil {
-				continue
-			}
-			rel.ID = uuid.New().String()
-			if err := s.relRepo.Create(rel); err != nil {
-				log.Printf("warning: create inferred relationship: %v", err)
-				continue
-			}
-			if link, err := s.relRepo.GetByID(rel.ID); err == nil {
-				created = append(created, link)
-			}
-		}
-	}
-	return created, nil
-}
-
-// activeEdgeExists reports whether the two people already share an open edge in
-// either direction, of any type. On a query error it returns true: a flaky read
-// must never turn into duplicate edges.
-func (s *AIService) activeEdgeExists(a, b string) bool {
-	active := true
-	existing, err := s.relRepo.List(models.RelationshipFilter{PersonID: a, Active: &active, Limit: 200})
-	if err != nil {
-		return true
-	}
-	for _, link := range existing {
-		if link.FromPersonID == b || link.ToPersonID == b {
-			return true
-		}
-	}
-	return false
-}
-
-// structureContext renders a person's structured relations and current
-// postings into the lines the advice prompt can read. This is what closes the
-// loop between "I marked this person as my manager" and "the advice knows they
-// are my manager": a relationship edge or a posting is a fact the user recorded
-// on purpose, and it belongs in front of the model next to the profile.
-func (s *AIService) structureContext(person *models.Person) (string, []string) {
-	var lines []string
-	var cited []string
-
-	if s.relRepo != nil {
-		rels, err := s.relRepo.List(models.RelationshipFilter{PersonID: person.ID})
-		if err != nil {
-			log.Printf("warning: advice relationship context skipped: %v", err)
-		} else if len(rels) > 0 {
-			var b strings.Builder
-			for _, r := range rels {
-				if b.Len() > 0 {
-					b.WriteString("\n")
-				}
-				outgoing := r.FromPersonID == person.ID
-				other := r.ToPersonName
-				if !outgoing {
-					other = r.FromPersonName
-				}
-				dir := "—"
-				if r.Direction == models.DirectionDirected {
-					if outgoing {
-						dir = "→"
-					} else {
-						dir = "←"
-					}
-				}
-				line := fmt.Sprintf("%s %s %s（%s）", person.Name, dir, other, r.RelationType)
-				// A relationship that started or ended is a fact about time, not
-				// just a label; an undated edge stays bare.
-				switch {
-				case r.EndDate != "":
-					line += "（已结束 " + r.EndDate + "）"
-				case r.StartDate != "":
-					line += "（自 " + r.StartDate + "）"
-				}
-				if r.Confirmed == 0 {
-					line += "（未确认）"
-				}
-				b.WriteString(line)
-				if r.SourceEventID != "" {
-					cited = append(cited, r.SourceEventID)
-				}
-			}
-			lines = append(lines, "关系："+b.String())
-		}
-	}
-
-	if s.posRepo != nil {
-		positions, err := s.posRepo.ListByPerson(person.ID)
-		if err != nil {
-			log.Printf("warning: advice position context skipped: %v", err)
-		} else {
-			var current []string
-			for _, p := range positions {
-				if p.EndDate != "" {
-					continue
-				}
-				if p.Role != "" {
-					current = append(current, fmt.Sprintf("%s（%s）", p.OrgName, p.Role))
-				} else {
-					current = append(current, p.OrgName)
-				}
-			}
-			if len(current) > 0 {
-				lines = append(lines, "现任组织与职位："+strings.Join(current, "、"))
-			}
-		}
-	}
-
-	return strings.Join(lines, "\n"), cited
-}
-
 // AdviceDraft is a generated answer together with the exact context it was drawn
 // from, so the caller can persist a session that is reviewable later instead of
 // a response body that disappears with the page.
@@ -578,31 +374,13 @@ func (s *AIService) GenerateAdvice(ctx context.Context, req models.AdviceRequest
 		return nil, fmt.Errorf("list recent events: %w", err)
 	}
 	var notes string
-	var person *models.Person
 	if p, err := s.personRepo.GetByID(req.PersonID); err == nil {
-		person = p
 		notes = p.Notes
-	}
-
-	// The user's structured relations and postings are facts they recorded on
-	// purpose; they belong in the prompt alongside the profile, not only on the
-	// graph page. A question like "how do I ask my manager" needs the model to
-	// know who the manager is.
-	structureLines := ""
-	structureCited := []string{}
-	if person != nil {
-		structureLines, structureCited = s.structureContext(person)
 	}
 
 	related, relatedTraits, retrievalStatus := s.retrieveRelated(ctx, req.PersonID, req.Question)
 
-	seen := make(map[string]bool, len(recent)+len(related)+len(structureCited))
-	// A relationship edge citing a record means that record was part of the
-	// structured context too; fold it into the evidence set so a stale source is
-	// still visible as stale rather than silently dropped.
-	for _, id := range structureCited {
-		seen[id] = true
-	}
+	seen := make(map[string]bool, len(recent)+len(related))
 	var evidence []*models.Event
 	for _, e := range append(append([]*models.Event{}, related...), recent...) {
 		if e == nil || seen[e.ID] {
@@ -667,7 +445,7 @@ func (s *AIService) GenerateAdvice(ctx context.Context, req models.AdviceRequest
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		resp, err := s.client.Chat(ctx, s.cfg.AdviceModel, []ai.Message{
-			ai.System(fmt.Sprintf(advicePrompt, joinOr(traitLines, "无"), notes, joinOr([]string{strings.TrimSpace(structureLines)}, "无"), goalLine, joinOr(eventLines, "无"))),
+			ai.System(fmt.Sprintf(advicePrompt, joinOr(traitLines, "无"), notes, goalLine, joinOr(eventLines, "无"))),
 			ai.User(req.Question),
 		}, ai.ChatOptions{JSONMode: true, Temperature: 0.7, MaxTokens: 8000})
 		if err != nil {

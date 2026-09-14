@@ -54,7 +54,7 @@ func newAdviceAPI(t *testing.T) *adviceFixture {
 	}
 
 	cfg := &config.LLMConfig{Endpoint: "http://127.0.0.1:1", ExtractModel: "test", AdviceModel: "test"}
-	aiService := service.NewAIService(cfg, vec, traitRepo, eventRepo, personRepo, repository.NewRelationshipRepo(database), repository.NewPositionRepo(database), ai.NewClient(cfg))
+	aiService := service.NewAIService(cfg, vec, traitRepo, eventRepo, personRepo, ai.NewClient(cfg))
 	adviceService := service.NewAdviceService(adviceRepo, eventRepo, followUpRepo, persons, aiService)
 
 	handler := NewAdviceHandler(adviceService)

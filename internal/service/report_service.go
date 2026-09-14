@@ -31,8 +31,6 @@ type ReportService struct {
 	reports   *repository.ReportRepo
 	events    *repository.EventRepo
 	followUps *repository.FollowUpRepo
-	relations *repository.RelationshipRepo
-	positions *repository.PositionRepo
 	persons   *PersonService
 	ai        *AIService
 }
@@ -41,14 +39,12 @@ func NewReportService(
 	reports *repository.ReportRepo,
 	events *repository.EventRepo,
 	followUps *repository.FollowUpRepo,
-	relations *repository.RelationshipRepo,
-	positions *repository.PositionRepo,
 	persons *PersonService,
 	ai *AIService,
 ) *ReportService {
 	return &ReportService{
 		reports: reports, events: events, followUps: followUps,
-		relations: relations, positions: positions, persons: persons, ai: ai,
+		persons: persons, ai: ai,
 	}
 }
 
@@ -78,7 +74,6 @@ func (s *ReportService) Generate(ctx context.Context, req models.ReportRequest) 
 		CarriedOver: []models.ReportFollowUpRef{},
 		Upcoming:    []models.ReportFollowUpRef{},
 		Completed:   []models.ReportFollowUpRef{},
-		Changes:     []models.ReportChangeRef{},
 		Events:      []models.ReportEventRef{},
 		Promises:    []models.ReportPromise{},
 		Persons:     []models.ReportPersonSummary{},
@@ -139,9 +134,9 @@ func (s *ReportService) Delete(id string) error {
 	return s.reports.Delete(id)
 }
 
-// collect fills every section. Records, open work and graph changes are read
-// independently and only meet here, because each answers a different question:
-// what happened, what is owed, and what the relationship looks like now.
+// collect fills every section. Records and open work are read independently and
+// only meet here, because each answers a different question: what happened, and
+// what is owed.
 func (s *ReportService) collect(ctx context.Context, r *models.Report, now time.Time) error {
 	names := &reportNames{persons: s.persons, cache: map[string]string{}}
 	if r.PersonID != "" {
@@ -208,12 +203,6 @@ func (s *ReportService) collect(ctx context.Context, r *models.Report, now time.
 	}
 	s.bucketFollowUps(r, items, names, now, agg)
 
-	changes, err := s.collectChanges(r, names)
-	if err != nil {
-		return err
-	}
-	r.Changes = changes
-
 	r.Persons = agg.summary()
 	return nil
 }
@@ -263,73 +252,6 @@ func (s *ReportService) bucketFollowUps(r *models.Report, items []*models.Follow
 	r.OpenCount = len(r.Overdue) + len(r.DueSoon) + len(r.Waiting) + len(r.CarriedOver) + len(r.Upcoming)
 }
 
-// collectChanges reports what moved on the relationship graph inside the period.
-// Dated events are used rather than row creation time: an edge entered today
-// about a posting that ended in March is history, not news.
-func (s *ReportService) collectChanges(r *models.Report, names *reportNames) ([]models.ReportChangeRef, error) {
-	links, err := s.relations.List(models.RelationshipFilter{PersonID: r.PersonID})
-	if err != nil {
-		return nil, fmt.Errorf("list relationships: %w", err)
-	}
-	positions, err := s.positions.ListAll()
-	if err != nil {
-		return nil, fmt.Errorf("list positions: %w", err)
-	}
-
-	changes := []models.ReportChangeRef{}
-	for _, link := range links {
-		fromID, fromName := link.FromPersonID, link.FromPersonName
-		toID, toName := link.ToPersonID, link.ToPersonName
-		// A scoped report phrases every edge from the person it is about.
-		if r.PersonID != "" && r.PersonID == toID {
-			fromID, fromName, toID, toName = toID, toName, fromID, fromName
-		}
-		for _, edge := range []struct {
-			kind string
-			date string
-		}{
-			{models.ReportRelationshipStarted, link.StartDate},
-			{models.ReportRelationshipEnded, link.EndDate},
-		} {
-			if !within(edge.date, r.Start, r.End) {
-				continue
-			}
-			changes = append(changes, models.ReportChangeRef{
-				Kind: edge.kind, ID: link.ID,
-				PersonID: fromID, PersonName: displayName(fromName, names, fromID),
-				CounterpartID: toID, CounterpartName: displayName(toName, names, toID),
-				Description: link.RelationType, Date: edge.date,
-			})
-		}
-	}
-
-	for _, pos := range positions {
-		if r.PersonID != "" && pos.PersonID != r.PersonID {
-			continue
-		}
-		for _, edge := range []struct {
-			kind string
-			date string
-		}{
-			{models.ReportPositionStarted, pos.StartDate},
-			{models.ReportPositionEnded, pos.EndDate},
-		} {
-			if !within(edge.date, r.Start, r.End) {
-				continue
-			}
-			changes = append(changes, models.ReportChangeRef{
-				Kind: edge.kind, ID: pos.ID,
-				PersonID: pos.PersonID, PersonName: displayName(pos.PersonName, names, pos.PersonID),
-				CounterpartID: pos.OrgID, CounterpartName: pos.OrgName,
-				Description: pos.Role, Date: edge.date,
-			})
-		}
-	}
-
-	sort.SliceStable(changes, func(i, j int) bool { return changes[i].Date < changes[j].Date })
-	return changes, nil
-}
-
 // outline renders the aggregation as plain text. It carries names and dates but
 // deliberately no ids: the narrative should read the facts, not echo keys that
 // the interface already renders as links.
@@ -361,7 +283,6 @@ func (s *ReportService) outline(r *models.Report) string {
 	writeSection(&b, "本期完成", describeFollowUps(r.Completed, func(ref models.ReportFollowUpRef) string {
 		return fmt.Sprintf("%s：%s", ref.PersonName, ref.Title)
 	}))
-	writeSection(&b, "关系与任职变化", changeLines(r.Changes))
 	writeSection(&b, "本期记录", eventLines(r.Events))
 	writeSection(&b, "本期承诺", promiseLines(r.Promises))
 	writeSection(&b, "下一步可执行", describeFollowUps(r.Upcoming, func(ref models.ReportFollowUpRef) string {
@@ -387,32 +308,6 @@ func describeFollowUps(refs []models.ReportFollowUpRef, render func(models.Repor
 	lines := make([]string, 0, len(refs))
 	for _, ref := range refs {
 		lines = append(lines, render(ref))
-	}
-	return lines
-}
-
-func changeLines(changes []models.ReportChangeRef) []string {
-	lines := make([]string, 0, len(changes))
-	for _, c := range changes {
-		verb := map[string]string{
-			models.ReportRelationshipStarted: "建立关系",
-			models.ReportRelationshipEnded:   "结束关系",
-			models.ReportPositionStarted:     "开始任职",
-			models.ReportPositionEnded:       "结束任职",
-		}[c.Kind]
-		who := c.PersonName
-		if who == "" {
-			who = "某人"
-		}
-		what := c.Description
-		if what == "" {
-			what = "身份"
-		}
-		line := fmt.Sprintf("%s 于 %s %s：%s", who, c.Date, verb, what)
-		if c.CounterpartName != "" {
-			line += fmt.Sprintf("（对方：%s）", c.CounterpartName)
-		}
-		lines = append(lines, line)
 	}
 	return lines
 }
@@ -474,15 +369,6 @@ func (n *reportNames) get(id string) string {
 	}
 	n.cache[id] = name
 	return name
-}
-
-// displayName prefers a name that came from a join and falls back to a lookup,
-// so the report never shows a raw id where a person is expected.
-func displayName(joined string, names *reportNames, id string) string {
-	if strings.TrimSpace(joined) != "" {
-		return joined
-	}
-	return names.get(id)
 }
 
 // personAggregate accumulates the per-person view while the sections are built,

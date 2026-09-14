@@ -118,9 +118,9 @@ try {
         exit 1
     }
 
-    # Contract: unknown resources answer in the error envelope. Use a missing
-    # resource id, not an unknown route: unmatched /api paths fall through to
-    # the SPA catch-all by design.
+    # Contract: failures under /api answer in the error envelope, whether Echo
+    # rejected a missing row (handler path) or an unknown route (router path).
+    # Neither may fall through to the SPA shell.
     $r = Http "GET" "/api/persons/does-not-exist" ""
     if ($r.code -ne 404 -or $r.body -notmatch '"ok":false') {
         Write-Output "404 envelope broken: code=$($r.code) body=$($r.body)"
@@ -128,15 +128,14 @@ try {
         exit 1
     }
 
-    # Maintenance endpoint (phase 6).
-    $r = Http "POST" "/api/maintenance/cleanup" ""
-    if ($r.code -ne 200 -or $r.body -notmatch '"ok":true') {
-        Write-Output "maintenance cleanup failed: code=$($r.code) body=$($r.body)"
+    $r = Http "GET" "/api/no-such-endpoint" ""
+    if ($r.code -ne 404 -or $r.body -notmatch '"ok":false') {
+        Write-Output "unrouted /api path did not answer 404 JSON: code=$($r.code) body=$($r.body)"
         $script:smokeFailed = $true
         exit 1
     }
 
-    Write-Output "smoke passed (version header / 404 envelope / maintenance cleanup)"
+    Write-Output "smoke passed (version header / 404 envelope / unrouted path)"
 }
 finally {
     if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }

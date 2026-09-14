@@ -52,6 +52,11 @@ var schemaMigrations = []migration{
 			`PRAGMA foreign_keys = ON`,
 		},
 	},
+	// person_relationships and person_org_positions are still created here, but no
+	// feature reads or writes them any more: the relationship graph and the
+	// structured posting history were both removed. The tables stay so existing
+	// databases keep their rows (and so the backup export still carries them);
+	// a fresh install simply leaves them empty.
 	{
 		version: 3,
 		name:    "structured relationships, organisation positions and event participants",

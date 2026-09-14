@@ -12,8 +12,8 @@
 | `persons` | 人物档案 | name、relation（自由文本）、importance、notes、org_id、position；`is_self`（部分唯一索引：最多一人） |
 | `events` | **事实来源**：互动记录 | raw_text（原文）、person_id（锚定人，可空，ON DELETE SET NULL）、event_date、summary、my_feeling、their_reaction、promises(JSON)、record_type、channel；v5 增 extraction_status / extraction_error / extracted_at / manually_edited / edited_at |
 | `traits` | AI 画像（派生） | trait_key/value、confidence、source_event_ids(JSON)、verified(-1/0/1)；v5 增 source_stale / source_stale_reason |
-| `person_relationships` | 人物关系边 | from/to_person_id、relation_type、direction(directed/undirected)、start/end_date、source_event_id、confirmed |
-| `person_org_positions` | 任职历史 | person_id、org_id、role、start/end_date（end_date 非空即离任）、source |
+| `person_relationships` | **已废弃**：人物关系边。建表保留、数据保留，无代码读写（ADR-011） | from/to_person_id、relation_type、direction(directed/undirected)、start/end_date、source_event_id、confirmed |
+| `person_org_positions` | **已废弃**：结构化任职历史。建表保留、数据保留，无代码读写；职位见 `persons.position`（ADR-011） | person_id、org_id、role、start/end_date（end_date 非空即离任）、source |
 | `event_participants` | 记录参与人 | (event_id, person_id) 主键、role（primary=锚定人回填） |
 | `follow_ups` | 跟进事项 | title、due_date、due_text（期限原文）、status、owner、source_event_id、completion_note、completed_event_id；v6 增 source_advice_id / source_advice_stale(_reason) |
 | `follow_up_postponements` | 延期历史 | follow_up_id、old/new_due_date、reason |

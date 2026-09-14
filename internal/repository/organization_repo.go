@@ -119,35 +119,25 @@ func (r *OrganizationRepo) Update(org *models.Organization) error {
 	return nil
 }
 
-// Archive and Restore flip the soft state. Both are no-op safe: archiving an
-// archived organisation just rewrites the same timestamp.
-func (r *OrganizationRepo) Archive(id string) (*models.Organization, error) {
-	at, _ := models.NowUTC()
-	res, err := r.db.Exec(`UPDATE organizations SET archived_at = ?, updated_at = ? WHERE id = ?`, at, at, id)
+// Archive is a soft delete: the row stays so the people who were attached to it
+// keep their employer, but it drops out of every picker. Restore clears the
+// stamp and the organisation is assignable again.
+func (r *OrganizationRepo) Archive(id string) error {
+	archived, _ := models.NowUTC()
+	res, err := r.db.Exec(`UPDATE organizations SET archived_at = ?, updated_at = ? WHERE id = ?`, archived, archived, id)
 	if err != nil {
-		return nil, fmt.Errorf("archive organization: %w", err)
+		return fmt.Errorf("archive organization: %w", err)
 	}
-	if err := requireRow(res, "organization", id); err != nil {
-		return nil, err
-	}
-	return r.GetByID(id)
+	return requireRow(res, "organization", id)
 }
 
-func (r *OrganizationRepo) Restore(id string) (*models.Organization, error) {
-	now, t := models.NowUTC()
-	res, err := r.db.Exec(`UPDATE organizations SET archived_at = NULL, updated_at = ? WHERE id = ?`, now, id)
+func (r *OrganizationRepo) Restore(id string) error {
+	updated, _ := models.NowUTC()
+	res, err := r.db.Exec(`UPDATE organizations SET archived_at = NULL, updated_at = ? WHERE id = ?`, updated, id)
 	if err != nil {
-		return nil, fmt.Errorf("restore organization: %w", err)
+		return fmt.Errorf("restore organization: %w", err)
 	}
-	if err := requireRow(res, "organization", id); err != nil {
-		return nil, err
-	}
-	restored, err := r.GetByID(id)
-	if err != nil {
-		return nil, err
-	}
-	restored.UpdatedAt = t
-	return restored, nil
+	return requireRow(res, "organization", id)
 }
 
 // Delete drops the organization and detaches its members. The foreign key

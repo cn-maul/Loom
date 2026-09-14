@@ -11,7 +11,6 @@ import {
   NotebookPen,
   Search,
   Settings,
-  Share2,
   Sun,
   Users,
 } from 'lucide-react';
@@ -21,7 +20,6 @@ import Events from './routes/Events';
 import HomePage from './routes/Home';
 import Organizations from './routes/Organizations';
 import PersonDetail from './routes/PersonDetail';
-import Relationships from './routes/Relationships';
 import Report from './routes/Report';
 import SettingsPage from './routes/Settings';
 import { QUICK_RECORD_EVENT, UNAUTHORIZED_EVENT, authToken } from './api/client';
@@ -45,10 +43,7 @@ const NAV_GROUPS: { label: string; items: NavEntry[] }[] = [
   },
   {
     label: '关系',
-    items: [
-      { to: '/organizations', icon: Building2, label: '人物与组织' },
-      { to: '/relationships', icon: Share2, label: '关系图谱' },
-    ],
+    items: [{ to: '/organizations', icon: Building2, label: '人物与组织' }],
   },
   {
     label: '回顾',
@@ -201,7 +196,6 @@ function Shell() {
               <Route path="/events" element={<Events />} />
               <Route path="/events/:id" element={<EventDetail />} />
               <Route path="/organizations" element={<Organizations />} />
-              <Route path="/relationships" element={<Relationships />} />
               <Route path="/advice" element={<Advice />} />
               <Route path="/report" element={<Report />} />
               <Route path="/settings" element={<SettingsPage />} />

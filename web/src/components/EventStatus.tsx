@@ -23,10 +23,6 @@ const STATUS_META: Record<string, { label: string; className: string }> = {
   },
 };
 
-export function statusLabel(status: string): string {
-  return STATUS_META[status]?.label ?? STATUS_META.pending.label;
-}
-
 export function EventStatusBadge({ event, className }: { event: Event; className?: string }) {
   const status = event.extraction_status || 'pending';
   const meta = STATUS_META[status] ?? STATUS_META.pending;

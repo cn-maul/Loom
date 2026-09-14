@@ -39,7 +39,6 @@ func TestReportRepoRoundTrip(t *testing.T) {
 			EventDate: "2026-09-02", Summary: "聊了合作", ExtractionStatus: "succeeded",
 		}},
 		Promises:   []models.ReportPromise{{EventID: "e1", Who: "张总", What: "下周给答复"}},
-		Changes:    []models.ReportChangeRef{{Kind: models.ReportPositionStarted, ID: "pos1", Description: "工程师"}},
 		EventCount: 1, PromiseCount: 1, OpenCount: 1,
 	}
 	if err := repo.Create(report); err != nil {
@@ -59,8 +58,8 @@ func TestReportRepoRoundTrip(t *testing.T) {
 	if len(stored.Events) != 1 || stored.Events[0].Summary != "聊了合作" {
 		t.Fatalf("events section did not survive: %+v", stored.Events)
 	}
-	if len(stored.Promises) != 1 || len(stored.Changes) != 1 {
-		t.Fatalf("sections did not survive: %d promises, %d changes", len(stored.Promises), len(stored.Changes))
+	if len(stored.Promises) != 1 {
+		t.Fatalf("promises section did not survive: %+v", stored.Promises)
 	}
 	if stored.GeneratedAt.IsZero() {
 		t.Fatal("generated_at was not stamped")

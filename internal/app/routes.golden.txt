@@ -5,8 +5,6 @@ DELETE /api/events/:id
 DELETE /api/events/:id/participants/:personID
 DELETE /api/organizations/:id
 DELETE /api/persons/:id
-DELETE /api/positions/:id
-DELETE /api/relationships/:id
 DELETE /api/reports/:id
 GET /api/advice
 GET /api/advice/:id
@@ -23,22 +21,16 @@ GET /api/export
 GET /api/follow-ups
 GET /api/follow-ups/:id
 GET /api/follow-ups/:id/postponements
-GET /api/graph
 GET /api/organizations
-GET /api/organizations/:id/members
 GET /api/persons
 GET /api/persons/:id
 GET /api/persons/:id/events
 GET /api/persons/:id/follow-ups
-GET /api/persons/:id/positions
-GET /api/persons/:id/relationships
 GET /api/persons/:id/traits
-GET /api/relationships/types
 GET /api/reports
 GET /api/reports/:id
 POST /api/advice
 POST /api/advice/:id/adopt
-POST /api/ai/infer-hierarchy
 POST /api/ai/reindex
 POST /api/backups
 POST /api/backups/restore
@@ -54,8 +46,6 @@ POST /api/organizations
 POST /api/organizations/:id/archive
 POST /api/organizations/:id/restore
 POST /api/persons
-POST /api/persons/:id/positions
-POST /api/relationships
 POST /api/reports
 PUT /api/config
 PUT /api/events/:id
@@ -63,6 +53,4 @@ PUT /api/events/:id/participants
 PUT /api/follow-ups/:id
 PUT /api/organizations/:id
 PUT /api/persons/:id
-PUT /api/positions/:id
-PUT /api/relationships/:id
 PUT /api/traits/:id/verify

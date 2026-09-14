@@ -45,24 +45,6 @@ func (h *OrganizationHandler) List(c echo.Context) error {
 	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: orgs})
 }
 
-// Archive is soft: the row stays so historical postings keep their meaning,
-// and it merely disappears from assignment pickers.
-func (h *OrganizationHandler) Archive(c echo.Context) error {
-	org, err := h.service.Archive(c.Param("id"))
-	if err != nil {
-		return respondError(c, err, "ACTION_FAILED")
-	}
-	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: org})
-}
-
-func (h *OrganizationHandler) Restore(c echo.Context) error {
-	org, err := h.service.Restore(c.Param("id"))
-	if err != nil {
-		return respondError(c, err, "ACTION_FAILED")
-	}
-	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: org})
-}
-
 func (h *OrganizationHandler) Update(c echo.Context) error {
 	var org models.Organization
 	if err := bindJSON(c, &org); err != nil {
@@ -73,6 +55,22 @@ func (h *OrganizationHandler) Update(c echo.Context) error {
 		return respondError(c, err, "UPDATE_FAILED")
 	}
 	return c.JSON(http.StatusOK, models.APIResponse{OK: true, Data: org})
+}
+
+// Archive is soft: the row stays so the people who worked there keep their
+// employer, and the organisation simply stops appearing in pickers.
+func (h *OrganizationHandler) Archive(c echo.Context) error {
+	if err := h.service.Archive(c.Param("id")); err != nil {
+		return respondError(c, err, "ACTION_FAILED")
+	}
+	return c.JSON(http.StatusOK, models.APIResponse{OK: true})
+}
+
+func (h *OrganizationHandler) Restore(c echo.Context) error {
+	if err := h.service.Restore(c.Param("id")); err != nil {
+		return respondError(c, err, "ACTION_FAILED")
+	}
+	return c.JSON(http.StatusOK, models.APIResponse{OK: true})
 }
 
 func (h *OrganizationHandler) Delete(c echo.Context) error {

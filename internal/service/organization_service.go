@@ -23,8 +23,7 @@ func (s *OrganizationService) Create(org *models.Organization) error {
 	return s.repo.Create(org)
 }
 
-// GetByID resolves one organisation. Internally it backs position writes;
-// there is no HTTP single-read route.
+// GetByID resolves one organisation. There is no HTTP single-read route.
 func (s *OrganizationService) GetByID(id string) (*models.Organization, error) {
 	return s.repo.GetByID(id)
 }
@@ -49,14 +48,14 @@ func (s *OrganizationService) Update(org *models.Organization) error {
 	return s.repo.Update(org)
 }
 
-// Archive keeps the organisation readable but out of every picker. Memberships
-// (positions) are untouched: a wound-down employer still explains who worked
-// there and when.
-func (s *OrganizationService) Archive(id string) (*models.Organization, error) {
+// Archive hides an organisation from every picker without losing it: the people
+// who were attached to it keep their employer. It is the reversible alternative
+// to Delete, which detaches them.
+func (s *OrganizationService) Archive(id string) error {
 	return s.repo.Archive(id)
 }
 
-func (s *OrganizationService) Restore(id string) (*models.Organization, error) {
+func (s *OrganizationService) Restore(id string) error {
 	return s.repo.Restore(id)
 }
 

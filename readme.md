@@ -310,8 +310,8 @@ backup
   目录全链路演练（建数据 → 快照 → 校验 → 删除记录 → 两阶段恢复 → 重启验证），
   不接触真实数据；通过标准是最后一行 `DRILL PASSED`。每月至少一次，改动备份/恢复/
   迁移路径后加跑。
-- **数据治理**：每次启动自动清理孤儿向量（事实已不存在的向量行）；
-  `POST /api/maintenance/cleanup` 可手动触发并返回计数报告。审计日志默认永久保留，
+- **数据治理**：每次启动自动清理孤儿向量（事实已不存在的向量行），计数写进启动
+  日志；没有手动触发入口，重启即重跑。审计日志默认永久保留，
   `maintenance.audit_retention_days` 可显式缩短。失败提取任务无需清理：队列历史
   自剪 500 条上限，失败的记录保留原文（原文是事实）。
 - **发布检查清单 / 迁移检查 / 回滚方案**：见 `docs/RELEASE.md`。
@@ -442,21 +442,22 @@ PUT    apiconfig                  更新配置（切换模型endpoint）
 
 ---
 
-### 7.1 结构化关系、任职与多人记录（已实现）
+### 7.1 多人记录与遗留结构化表（部分已移除）
 
-除人物档案上的自由文本 `relation` 外，另有三张结构化表。它们与人物档案的旧字段并存，
-旧字段只作为档案描述，不再用来推断关系边。
+除人物档案上的自由文本 `relation` 外，历史版本曾建立三张结构化表。**关系边与结构化任职
+已于 2026-09-14 整块下线**（见 `docs/architecture/decisions.md` ADR-011）：端点、服务、
+前端页面全部删除，只保留表结构与既有数据；`event_participants` 是唯一仍在使用的表。
 
 ```sql
--- 人物—人物关系（有向/无向、起止时间、来源记录、确认状态）
+-- 已废弃：人物—人物关系。表保留，没有任何代码读写。
 CREATE TABLE person_relationships (
     id              TEXT PRIMARY KEY,
     from_person_id  TEXT NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
     to_person_id    TEXT NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
-    relation_type   TEXT NOT NULL,                     -- 上级 / 同事 / 客户 …
-    direction       TEXT NOT NULL DEFAULT 'directed',  -- directed | undirected
+    relation_type   TEXT NOT NULL,
+    direction       TEXT NOT NULL DEFAULT 'directed',
     start_date      TEXT,
-    end_date        TEXT,                              -- 非空即已结束，保留历史
+    end_date        TEXT,
     source_event_id TEXT REFERENCES events(id) ON DELETE SET NULL,
     confirmed       INTEGER NOT NULL DEFAULT 0,
     notes           TEXT,
@@ -464,21 +465,21 @@ CREATE TABLE person_relationships (
     updated_at      TEXT DEFAULT (datetime('now'))
 );
 
--- 人物—组织任职（同一人可多组织、多段历史）
+-- 已废弃：人物—组织任职。表保留，没有任何代码读写；职位改用 persons.position 自由文本。
 CREATE TABLE person_org_positions (
     id          TEXT PRIMARY KEY,
     person_id   TEXT NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
     org_id      TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     role        TEXT,
     start_date  TEXT,
-    end_date    TEXT,        -- 非空即已离任；NULL 表示现任
+    end_date    TEXT,
     source      TEXT,
     notes       TEXT,
     created_at  TEXT DEFAULT (datetime('now')),
     updated_at  TEXT DEFAULT (datetime('now'))
 );
 
--- 记录参与人（一条记录只存一次，从每位参与人都能看到）
+-- 使用中：记录参与人（一条记录只存一次，从每位参与人都能看到）
 CREATE TABLE event_participants (
     event_id   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     person_id  TEXT NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
@@ -492,27 +493,19 @@ CREATE TABLE event_participants (
 
 - `events.person_id` 是可空的「锚定人」，外键为 `ON DELETE SET NULL`。删除某人不会连带删掉
   其他人也参与的记录；参与人行会随之级联清理。
-- 「共同经历」由 `event_participants` 自连接派生（`GET /api/relationships/co-attendance`），
-  只作为图上的一种关联展示，绝不自动写成朋友、同事或上下级关系。
-- `persons.is_self` 标记「我」，全局最多一人（部分唯一索引保证）；关系边因此可以说清主体。
-- 未知时间一律存 NULL，不用推测日期填充。旧 `org_id` 会迁移成一段起止时间未知的任职。
+- `persons.is_self` 标记「我」，全局最多一人（部分唯一索引保证），首页与建议据此区分主体。
+- 未知时间一律存 NULL，不用推测日期填充。
+- 人物的「职位」只有一个载体：`persons.position` 自由文本，由人物表单读写，组织页据此展示。
+  结构化任职表不再参与任何读写，不要再把两者混为一谈。
 
 对应接口：
 
 ```
-POST/GET/PUT/DELETE api/relationships            关系边（List 支持 person_id/type/confirmed/active/q/limit/offset）
-GET                 api/relationships/types      已用过的关系类型
-GET                 api/relationships/co-attendance  派生的共同经历
-GET                 api/persons/:id/relationships
-
-POST                api/persons/:id/positions    新增任职
-GET                 api/persons/:id/positions    某人的任职历史
-GET                 api/organizations/:id/members?current=true   现任/历史成员
-PUT/DELETE          api/positions/:id            改期或结束任职
-
 GET/PUT             api/events/:id/participants  参与人列表 / 整体替换
 DELETE              api/events/:id/participants/:personID
 GET                 api/events?person_id=&from=&to=&q=&limit=&offset=   记录检索与分页
+POST                api/organizations/:id/archive    归档（软删，可恢复）
+POST                api/organizations/:id/restore    取消归档
 ```
 
 迁移采用版本号表 `schema_migrations`，每个版本只执行一次，可重复启动；
@@ -732,29 +725,6 @@ DELETE api/reports/:id              删除快照
 
 ---
 
-### 7.6 关系图谱（已实现）
-
-`GET /api/graph` 一次返回整张画布，前端不再自行拼接四个列表：
-
-| 分区 | 内容 |
-|---|---|
-| `nodes` | 全部人物：id、姓名、is_self、组织与归属、重要度、记录数（复用人物列表投影，与首页口径一致） |
-| `orgs` | 活跃组织节点，带现任成员数；已归档组织不出现在图谱 |
-| `edges` | 两族边：`kind=relationship`（person_relationships 全量，含已结束——历史置灰不隐藏）与 `kind=position`（现任任职，人物→组织；已离任的任职属于组织页历史，不画进图谱） |
-| `co_attendance` | 共同经历对，`participants UNION events.person_id` 后自连接派生 |
-
-- **锚定人计入共同经历**：只用参与人表自连接会漏掉「只有锚定人、没填参与人」的记录，
-  UNION 把 `events.person_id` 纳入后，一条只写给自己的记录也能把我和对方连起来。
-- **共同经历永远不是关系边**：它是「同场出现」的派生事实，图谱上用点线呈现且明确提示，
-  不自动推断为朋友/同事/上下级。
-- **过滤在前端**：数据量是个人 CRM 量级，接口整体返回；关系类型、组织、时间窗
-  （边的起止与窗口相交）、含/不含已结束均在客户端筛选。
-- 前端 `/relationships` 页：无依赖的轻量力导向布局（人物圆节点按记录数定大小，
-  组织为方块节点），点边看详情（方向/起止/确认状态/备注/来源记录跳转），
-  点节点跳人物或组织页；支持添加、编辑、结束、删除关系，双击关系边直接编辑。
-
----
-
 ### 7.7 记录列表与详情（已实现）
 
 记录此前只能从人物页的时间线进入，提取失败的记录也没有集中的入口。现在 `/events`
@@ -784,18 +754,16 @@ DELETE api/reports/:id              删除快照
 
 ---
 
-### 7.8 人物详情：任职、关系与画像失效（已实现）
+### 7.8 人物详情：概览、画像与记录（已实现）
 
-后端接口此前已全部就绪，这一轮把人物页补成规格书里的「概览 / 画像 / 任职 / 关系 / 记录」：
+人物页由「概览 / 画像 / 记录」三块组成，头部显示组织与职位（均为自由文本）：
 
-- **组织与任职卡片**：`GET /persons/:id/positions` 给出完整任职历史（现任在前），
-  可新增、**结束只写 `end_date` 保留历史行**、删除；卡片下半部显示当前组织的
-  类型/描述与同组织现任同事。
-- **关系卡片**：`GET /persons/:id/relationships` 带出双方姓名，展示方向、类型、
-  双向标记、未确认标记与起止；空态写明「同场出现只算共同经历，不会自动推断成关系」。
+- **人物概览卡片**：一段由 AI 依据近期记录写成的画像文字，可重新生成。
+- **AI 画像卡片**：逐条展示画像维度，可标记准确（采纳）或不准确（剔除，并写入
+  排除列表，避免换个说法再提）。
 - **画像失效提示**：`source_stale` 条目显示「依据已变」徽章、原因，并给出跳到来源
   记录重新提取的入口——这是清除标记的唯一正确动作。
-- **切人清场**：切换人物时清空提问框、编辑态与任职表单，避免上一个人的草稿留在该页面。
+- **切人清场**：切换人物时清空提问框与编辑态，避免上一个人的草稿留在该页面。
 
 配套修掉的缺陷：`POST /api/events/:id/extract` 成功后会重新派生画像（此前只重写
 提取结果，导致「依据已变」的画像按提示重试后仍然挂着标记）。
@@ -813,23 +781,30 @@ web
 │   │   ├── client.ts          # fetch 封装
 │   │   └── types.ts           # 与后端共享类型
 │   ├── components
-│   │   ├── ui                # shadcnui
+│   │   ├── ui                # shadcnui 基础件（button / badge / input / textarea）
+│   │   ├── layout.tsx        # PageHeader / SectionCard / Field / Avatar / EmptyState
+│   │   ├── ui.tsx            # ErrorNote / Notice / Spinner / 表单控件样式
 │   │   ├── PersonPicker.tsx   # 人物选择器
 │   │   ├── QuickRecord.tsx    # 快速记录输入框
+│   │   ├── QuickRecordModal.tsx # 快速记录弹窗（含同场参与人）
 │   │   ├── EventTimeline.tsx  # 事件时间线
+│   │   ├── EventStatus.tsx    # 提取状态徽章
 │   │   ├── TraitList.tsx      # 画像列表（可标记准确不准确，失效条目提示重算）
+│   │   ├── CommandPalette.tsx # 全局跳转
 │   │   └── AdvicePanel.tsx    # 建议展示
 │   ├── routes
 │   │   ├── Home.tsx           # 人物列表 + 快速记录
-│   │   ├── PersonDetail.tsx   # 人物详情（任职历史 / 组织 / 关系 / 画像 / 记录）
+│   │   ├── PersonDetail.tsx   # 人物详情（概览 / 画像 / 时间线）
 │   │   ├── Events.tsx         # 记录列表（筛选 + 提取状态 + 重试）
 │   │   ├── EventDetail.tsx    # 记录详情（参与人 / 编辑 / 重试 / 承诺转事项）
 │   │   ├── FollowUps.tsx      # 跟进事项（筛选/操作/延期历史/手动新建）
-│   │   ├── Organizations.tsx  # 组织与成员任职
-│   │   ├── Relationships.tsx  # 关系图谱（力导向画布 + 增改关系）
+│   │   ├── Organizations.tsx  # 组织与人物档案（新建/编辑/归档/恢复）
 │   │   ├── Report.tsx         # 周报（窗口选择 + 五段式 + 历史快照）
-│   │   └── Advice.tsx         # 建议对话
+│   │   ├── Advice.tsx         # 建议对话
+│   │   └── Settings.tsx       # 配置、备份与审计
 │   ├── App.tsx
+│   ├── format.ts              # 时间与文案格式化
+│   ├── relationOptions.ts     # 人物分类标签
 │   └── main.tsx
 ├── index.css                  # @import tailwindcss;
 └── vite.config.ts

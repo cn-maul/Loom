@@ -27,9 +27,7 @@ type reportFixture struct {
 	database  *sql.DB
 	events    *repository.EventRepo
 	followUps *repository.FollowUpRepo
-	relations *repository.RelationshipRepo
 	person    *models.Person
-	other     *models.Person
 
 	mu         sync.Mutex
 	lastPrompt string
@@ -61,14 +59,12 @@ func newReportFixture(t *testing.T, chatOK bool) *reportFixture {
 	eventRepo := repository.NewEventRepo(database)
 	traitRepo := repository.NewTraitRepo(database)
 	followUpRepo := repository.NewFollowUpRepo(database)
-	relations := repository.NewRelationshipRepo(database)
-	positions := repository.NewPositionRepo(database)
 	reportRepo := repository.NewReportRepo(database)
 	vec := repository.NewVecRepo(database)
 
 	f := &reportFixture{
 		database: database, events: eventRepo, followUps: followUpRepo,
-		relations: relations, person: nil, other: nil,
+		person: nil,
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -95,17 +91,13 @@ func newReportFixture(t *testing.T, chatOK bool) *reportFixture {
 	}
 	persons := NewPersonService(personRepo, vec, repository.NewOrganizationRepo(database))
 	person := &models.Person{ID: uuid.New().String(), Name: "张总"}
-	other := &models.Person{ID: uuid.New().String(), Name: "李工"}
 	if err := persons.Create(person); err != nil {
 		t.Fatal(err)
 	}
-	if err := persons.Create(other); err != nil {
-		t.Fatal(err)
-	}
-	f.person, f.other = person, other
+	f.person = person
 
-	aiService := NewAIService(cfg, vec, traitRepo, eventRepo, personRepo, repository.NewRelationshipRepo(database), repository.NewPositionRepo(database), ai.NewClient(cfg))
-	f.svc = NewReportService(reportRepo, eventRepo, followUpRepo, relations, positions, persons, aiService)
+	aiService := NewAIService(cfg, vec, traitRepo, eventRepo, personRepo, ai.NewClient(cfg))
+	f.svc = NewReportService(reportRepo, eventRepo, followUpRepo, persons, aiService)
 	return f
 }
 
@@ -204,9 +196,9 @@ func TestReportBucketsCoverEveryOpenItem(t *testing.T) {
 	}
 }
 
-// The period's records, the promises inside them, and what moved on the
-// relationship graph all have to land in the report with ids a reader can open.
-func TestReportCollectsRecordsPromisesAndChanges(t *testing.T) {
+// The period's records and the promises inside them have to land in the report
+// with ids a reader can open.
+func TestReportCollectsRecordsAndPromises(t *testing.T) {
 	f := newReportFixture(t, true)
 	start, end := weekWindow()
 	today := time.Now().Format(models.DateLayout)
@@ -216,16 +208,6 @@ func TestReportCollectsRecordsPromisesAndChanges(t *testing.T) {
 		Promises: `[{"who":"张总","what":"下周给答复","deadline":"2026-09-15"}]`,
 	}
 	if err := f.events.Create(event); err != nil {
-		t.Fatal(err)
-	}
-	link := &models.Relationship{
-		ID: "r1", FromPersonID: f.person.ID, ToPersonID: f.other.ID,
-		RelationType: "前同事", StartDate: today,
-	}
-	if err := link.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.relations.Create(link); err != nil {
 		t.Fatal(err)
 	}
 
@@ -244,14 +226,6 @@ func TestReportCollectsRecordsPromisesAndChanges(t *testing.T) {
 	if len(report.Promises) != 1 || report.Promises[0].EventID != "e1" ||
 		report.Promises[0].Who != "张总" || report.Promises[0].What != "下周给答复" {
 		t.Fatalf("promises = %+v", report.Promises)
-	}
-	if len(report.Changes) != 1 {
-		t.Fatalf("changes = %+v", report.Changes)
-	}
-	change := report.Changes[0]
-	if change.Kind != models.ReportRelationshipStarted || change.PersonName != "张总" ||
-		change.CounterpartName != "李工" || change.Description != "前同事" {
-		t.Fatalf("change ref = %+v", change)
 	}
 	if len(report.Persons) != 1 || report.Persons[0].PersonName != "张总" ||
 		report.Persons[0].EventCount != 1 || report.Persons[0].LastEventDate != today {

@@ -57,7 +57,7 @@ func newRecordAPI(t *testing.T) *recordFixture {
 	eventService := service.NewEventService(eventRepo, vec, persons, traitRepo)
 
 	cfg := &config.LLMConfig{Endpoint: "http://127.0.0.1:1", ExtractModel: "test"}
-	aiService := service.NewAIService(cfg, vec, traitRepo, eventRepo, repository.NewPersonRepo(database), repository.NewRelationshipRepo(database), repository.NewPositionRepo(database), ai.NewClient(cfg))
+	aiService := service.NewAIService(cfg, vec, traitRepo, eventRepo, repository.NewPersonRepo(database), ai.NewClient(cfg))
 	// Synchronous ingest for tests: no background queue to wait on.
 	ingest := service.NewIngestService(aiService, &config.LLMConfig{AsyncExtract: false})
 	t.Cleanup(ingest.Stop)

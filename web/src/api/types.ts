@@ -41,79 +41,6 @@ export interface PersonListParams {
   offset?: number;
 }
 
-/** 结构化人物关系（person_relationships 表）。direction: directed|undirected */
-export interface Relationship {
-  id: string;
-  from_person_id: string;
-  to_person_id: string;
-  relation_type: string;
-  direction: 'directed' | 'undirected';
-  start_date: string;
-  end_date: string;
-  source_event_id: string;
-  confirmed: number;
-  notes: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface RelationshipLink extends Relationship {
-  from_person_name: string;
-  to_person_name: string;
-}
-
-/** GET /api/graph 的一次性画布数据。 */
-export interface GraphData {
-  nodes: GraphNode[];
-  orgs: GraphOrg[];
-  edges: GraphEdge[];
-  co_attendance: GraphCoLink[];
-  /** Total person count in the store; when it exceeds nodes.length the payload was capped. */
-  nodes_total: number;
-  truncated: boolean;
-}
-
-export interface GraphNode {
-  id: string;
-  name: string;
-  is_self: number;
-  org_id: string;
-  org_name: string;
-  importance: number;
-  event_count: number;
-}
-
-export interface GraphOrg {
-  id: string;
-  name: string;
-  kind: string;
-  member_count: number;
-}
-
-/** kind: relationship = 人物↔人物；position = 人物→组织（现任任职）。 */
-export interface GraphEdge {
-  id: string;
-  kind: 'relationship' | 'position';
-  from: string;
-  to: string;
-  type: string;
-  direction: string;
-  start_date: string;
-  end_date: string;
-  confirmed: number;
-  source_event_id: string;
-  notes: string;
-}
-
-/** 共同经历：两人出现在同一条记录（含锚定人），只是展示，绝不是关系边。 */
-export interface GraphCoLink {
-  a: string;
-  b: string;
-  a_name: string;
-  b_name: string;
-  shared_count: number;
-}
-
 export interface EventPromise {
   who: string;
   what: string;
@@ -272,18 +199,6 @@ export const RETRIEVAL_LABEL: Record<string, string> = {
 };
 
 /** One stint of one person at one organisation, with display names attached. */
-export interface OrgPositionLink {
-  id: string;
-  person_id: string;
-  org_id: string;
-  role: string;
-  start_date: string;
-  end_date: string;
-  notes: string;
-  person_name: string;
-  org_name: string;
-}
-
 export interface FollowUp {
   id: string;
   person_id: string;
@@ -366,17 +281,6 @@ export interface ReportPromise {
   deadline: string;
 }
 
-export interface ReportChangeRef {
-  kind: string;
-  id: string;
-  person_id: string;
-  person_name: string;
-  counterpart_id: string;
-  counterpart_name: string;
-  description: string;
-  date: string;
-}
-
 export interface ReportPersonSummary {
   person_id: string;
   person_name: string;
@@ -403,7 +307,6 @@ export interface Report {
   carried_over: ReportFollowUpRef[];
   upcoming: ReportFollowUpRef[];
   completed: ReportFollowUpRef[];
-  changes: ReportChangeRef[];
   events: ReportEventRef[];
   promises: ReportPromise[];
   persons: ReportPersonSummary[];

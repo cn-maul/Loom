@@ -46,7 +46,7 @@ type Organization struct {
 	Kind        string `json:"kind"`
 	Description string `json:"description"`
 	// ArchivedAt is nil for an active organisation. Archived ones stay readable
-	// — past postings still reference them — but stop appearing in pickers.
+	// and keep their members attached, but stop appearing in pickers.
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
@@ -66,12 +66,14 @@ type Person struct {
 	Importance int    `json:"importance"`
 	Notes      string `json:"notes"`
 	OrgID      string `json:"org_id"`
-	Position   string `json:"position"`
+	// Position is the free-text job title the user types on the person form. It
+	// is deliberately unstructured: the app does not model a stint history.
+	Position string `json:"position"`
 	// Gender is an explicit choice the user records: male / female, empty when
 	// not set. It is a fact about the person, not an inference.
 	Gender string `json:"gender"`
-	// IsSelf marks the person the user is themselves, so relationship edges can
-	// be phrased from "me" without guessing which node is the subject.
+	// IsSelf marks the person the user is themselves, so the app can phrase a
+	// record or a promise from "me" without asking which person is the subject.
 	IsSelf    int       `json:"is_self"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -490,7 +492,7 @@ type IngestReport struct {
 	Warnings      []string `json:"warnings"`
 	// Async is true when extraction was queued instead of run inline. The
 	// record is stored and visible now; the summary, index and profile refresh
-	// land later. Poll the record or GET /api/tasks to observe progress.
+	// land later. The record carries the live extraction_status to observe it.
 	Async bool `json:"async"`
 }
 

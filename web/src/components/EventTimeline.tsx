@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom';
 import type { Event } from '../api/types';
 import { eventHeadline, shortDate } from '../format';
 import { EmptyState } from './layout';
-import { cn } from '../lib/utils';
 
 interface Props {
   events: Event[];
@@ -78,21 +77,5 @@ export default function EventTimeline({ events, personNames, showPerson, emptyTe
         );
       })}
     </ol>
-  );
-}
-
-/** Compact variant used inside tight cards: same data, no card chrome. */
-export function EventTimelineDense({ events, className }: { events: Event[]; className?: string }) {
-  return (
-    <ul className={cn('space-y-1.5', className)}>
-      {events.map((event) => (
-        <li key={event.id} className="flex gap-2 text-sm">
-          <span className="w-14 shrink-0 font-mono text-xs text-muted-foreground">{shortDate(event.event_date)}</span>
-          <Link to={`/events/${event.id}`} className="line-clamp-1 text-foreground hover:text-primary">
-            {eventHeadline(event.summary, event.raw_text)}
-          </Link>
-        </li>
-      ))}
-    </ul>
   );
 }

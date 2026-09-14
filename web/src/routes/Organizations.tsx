@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Building2, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Building2, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { ErrorNote, Notice, Spinner, controlClass } from '../components/ui';
 import { Button } from '../components/ui/button';
@@ -127,8 +127,24 @@ export default function Organizations() {
     }
   };
 
+  // Archiving is the reversible alternative to deleting: nobody loses their
+  // employer and the organisation stops being offered in every picker.
+  const toggleArchiveOrg = async (org: Organization) => {
+    const archived = Boolean(org.archived_at);
+    if (!archived && !window.confirm(`归档「${org.name}」？它不会再出现在组织选择框里，成员关系保留，随时可以恢复。`)) return;
+    setError('');
+    try {
+      if (archived) await organizationApi.restore(org.id);
+      else await organizationApi.archive(org.id);
+      await reload();
+      flashNotice(archived ? `已恢复「${org.name}」` : `已归档「${org.name}」`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const deleteOrg = async (org: Organization) => {
-    if (!window.confirm(`删除「${org.name}」？其成员的任职记录会被级联删除（人物本身保留）。`)) return;
+    if (!window.confirm(`删除「${org.name}」？该组织下的人物会被解除归属，人物本身保留。`)) return;
     setError('');
     try {
       await organizationApi.delete(org.id);
@@ -267,7 +283,7 @@ export default function Organizations() {
                           </span>
                         </span>
                       </button>
-                      {/* Row-level edit / delete; hover-revealed so the list stays quiet. */}
+                      {/* Row-level edit / archive / delete; hover-revealed so the list stays quiet. */}
                       <div className="absolute right-2 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                         <button
                           onClick={() => openEditOrg(org)}
@@ -275,6 +291,13 @@ export default function Organizations() {
                           className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
                         >
                           <Pencil className="size-3.5" />
+                        </button>
+                        <button
+                          onClick={() => void toggleArchiveOrg(org)}
+                          title={archived ? `恢复「${org.name}」` : `归档「${org.name}」`}
+                          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                        >
+                          {archived ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
                         </button>
                         <button
                           onClick={() => void deleteOrg(org)}

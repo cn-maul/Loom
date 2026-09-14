@@ -3,6 +3,90 @@
 本文件记录 Loom 的显著变更。格式参考 Keep a Changelog；数据库 schema 版本与 API 版本
 在对应条目中注明。
 
+## [1.2.0] - 2026-09-15
+
+### 移除
+
+- **关系图谱功能整体下线**：前端 `/relationships` 页面与 `web/src/routes/Relationships.tsx`
+  一并删除（力导向画布、关系增删改、AI 推断上下级入口）。
+- **`GET /api/graph`**：端点及其 `GraphHandler`、`GraphService`、`GraphRepo`、
+  `models/graph.go` 与 `graph_handler_test.go` 全部移除；`routes.golden.txt` 与
+  `docs/architecture/api.md` 同步更新；ADR-009 的「图谱护栏」条目废止存档。
+- 前端 `graphApi` 封装与 `GraphData`/`GraphNode`/`GraphOrg`/`GraphEdge`/`GraphCoLink`
+  类型随之清理。
+- **`POST /api/ai/infer-hierarchy`**：端点及其 `AIHandler.InferHierarchy`、
+  `AIService.InferHierarchy`、`hierarchyPrompt`、`activeEdgeExists` 一并移除。
+  唯一入口是已下线的图谱页，删除后成为孤儿。前端 `aiApi.inferHierarchy` 同步清理。
+- **结构化关系边整体移除**：10 个端点中的 5 个——`POST /api/relationships`、
+  `GET /api/relationships/types`、`PUT/DELETE /api/relationships/:id`、
+  `GET /api/persons/:id/relationships`——连同 `RelationshipHandler`、`RelationshipService`、
+  `RelationshipRepo`、`models.Relationship`/`RelationshipLink`/`RelationshipFilter` 删除。
+  连带清理：AI 建议 prompt 的「关系与组织背景」整段与 `AIService.structureContext`、
+  报告里的「关系与任职变化」段与 `collectChanges`（含 `Report.Changes` 字段、
+  `ReportChangeRef` 与四个 change-kind 常量）、前端 `relationshipApi`、Advice 页
+  「AI 会读到的关系与组织」面板与 `Share2` 图标。路由总数 62 → 54。
+- **结构化任职整体移除**：`POST/GET /api/persons/:id/positions`、
+  `GET /api/organizations/:id/members`、`PUT/DELETE /api/positions/:id` 连同
+  `PositionHandler`、`PositionService`、`PositionRepo`、`models.OrgPosition`/`OrgPositionLink`
+  删除；前端 `positionApi`、`organizationApi` 的 members/addMember/endMembership/
+  removeMembership 四个方法同步清理。
+- 前端零引用文件：`components/ui/card.tsx`、`App.css`、`assets/hero.png`、
+  `assets/react.svg`、`assets/vite.svg`；以及 `EventTimeline.tsx` 的 `EventTimelineDense`、
+  `EventStatus.tsx` 的 `statusLabel`。
+
+### 新增
+
+- **组织归档/恢复端点回来，并且这次有前端入口**：`POST /api/organizations/:id/archive`
+  与 `/restore` 重新实现（上一版把它们当成无人调用的孤儿删掉了），组织页行操作区新增
+  归档/恢复按钮。归档是软删：组织不再出现在任何选择框，成员归属保留，随时可恢复；
+  真正删除仍走 `DELETE`（会把成员解除归属）。
+
+### 修复
+
+- **未匹配的 `/api` 路径曾以 200 + HTML 应答**：SPA 兜底路由 `GET /*` 会吃下任何 GET，
+  于是 `GET /api/persons-typo` 返回 `200 text/html` 和一份 index.html —— 调用方拿到的是
+  解析失败的 JSON，而不是「这个接口不存在」。同时 405 与 500 走的是 Echo 默认的
+  `{"message":...}`，只有 handler 自己产生的错误才符合 `docs/architecture/api.md` 承诺的包络。
+  现在 `internal/app/errors.go` 接管 `/api` 前缀下的所有失败：未路由 404 `NOT_FOUND`、
+  已知路径的错误方法 405 `METHOD_NOT_ALLOWED`（`Allow` 头保留）、请求体被拒 400
+  `INVALID_INPUT`、panic 500 `INTERNAL`；5xx 只回固定文案，不回显 panic 内容与驱动错误。
+  404/405 的判定不靠状态码而靠路由表（`:id` 段参与匹配），因为兜底路由让每个路径都
+  「有」一个方法。SPA 页面路径与静态资源的兜底行为不变，`OPTIONS` 预检仍由 CORS 中间件
+  以 204 短路。`routes.golden.txt` 未变——本次不动路由，只改失败路径的应答形状；
+  `internal/app/errors_test.go` 覆盖以上全部情形。
+- `scripts/release.sh` / `release.ps1` 的冒烟注释与断言同步更新：那两处「不要用未知路由，
+  因为会被 SPA 兜底吃掉」的绕行说明已失效，并各补一条未匹配 `/api` 路径必须 404 + 包络的断言。
+- **发布管线冒烟检查早已失效**：`scripts/release.ps1` 与 `release.sh` 断言
+  `POST /api/maintenance/cleanup` 返回 200，但该路由在阶段 6 改造中已不存在 —— 发布会在
+  冒烟这一步 exit 1。两处检查删除；`release.sh` 另有一处同类问题：`GET /api/nonexistent`
+  会被 SPA catch-all 命中并返回 `200 text/html`，永远过不了「404 包络」断言，改为
+  `GET /api/persons/does-not-exist`（与 release.ps1 一致）——该绕行随后被本次的
+  `/api` 错误包络修复彻底解决（见上一条），脚本现在两条路径都断言。
+- `docs/RELEASE.md`、`readme.md`、`docs/architecture/decisions.md`（ADR-010 第 1、4 条）
+  中残留的 `POST /api/maintenance/cleanup` 说法改为「只在启动时执行，无手动入口」。
+- **陈旧注释**：`docs/architecture/decisions.md`（ADR-006、ADR-009 第 5 条）与
+  `internal/models/models.go` 里仍在指向已删除的 `GET /api/tasks`，改为「记录自身的
+  extraction_status + 启动日志」；`models.Person.IsSelf` 与 `Organization.ArchivedAt`
+  的注释不再提关系边与任职行。
+
+### 影响
+
+- **关系边与任职的记录从此没有代码路径**：读写端点全部删除，也没有替代端点。
+  后端测试同步收缩（`structure_handler_test.go` 只保留参与人部分、
+  `structure_test.go` 只保留记录/人物部分、`report_service_test.go` 去掉 changes 断言、
+  `report_repo_test.go` 同理），`TestAPIRouteContract` 金样重新生成。
+- **数据零损失**：本地库实测 `person_relationships` 与 `person_org_positions` 均为 0 行，
+  所以这次移除没有丢任何用户数据。
+- **表结构保留**：两张表、索引、迁移 v3/v4（含回填步骤）与备份导出清单都不动——
+  删表是破坏性操作，收益只是少两张空表。`docs/architecture/api.md` 与 `readme.md` §7.1
+  已写明「表在，但没有任何代码读写」，避免以后被重新接上。
+- **职位仍在**：`persons.position` 自由文本照旧由人物表单读写、组织页展示。它和已删除的
+  结构化任职表从来不是一回事——ADR-011 专门记录这一点。
+- **唯一的实质能力损失**：AI 建议不再能读到用户手工标注的结构化关系，只能从画像与记录
+  原文推断立场。已确认无数据可读，且该面板在前端零使用。
+- 路由总数 62 → 54；`routes.golden.txt` 与 `docs/architecture/api.md` 同步；
+  新增 ADR-011 记录本次下线决策。
+
 ## [1.1.0] - 2026-09-12（架构演进改造：阶段 0–6）
 
 按《Loom架构演进与改造计划书》完成七个阶段改造。目标：不重写、不拆微服务，

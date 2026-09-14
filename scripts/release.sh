@@ -59,13 +59,16 @@ fi
 curl -s --noproxy '*' -D - -o /dev/null "$BASE/api/config" | grep -qi "x-api-version: 1" \
   || { echo "missing X-API-Version header"; exit 1; }
 
-code="$(curl -s --noproxy '*' -o "$TMP/404.json" -w '%{http_code}' "$BASE/api/nonexistent")"
+# Failures under /api answer in the error envelope, whether Echo rejected a
+# missing row (handler path) or an unknown route (router path). Neither may
+# fall through to the SPA shell.
+code="$(curl -s --noproxy '*' -o "$TMP/404.json" -w '%{http_code}' "$BASE/api/persons/does-not-exist")"
 grep -q '"ok":false' "$TMP/404.json" && [ "$code" = "404" ] \
   || { echo "404 envelope broken"; exit 1; }
 
-code="$(curl -s --noproxy '*' -X POST -o "$TMP/cleanup.json" -w '%{http_code}' "$BASE/api/maintenance/cleanup")"
-grep -q '"ok":true' "$TMP/cleanup.json" && [ "$code" = "200" ] \
-  || { echo "maintenance cleanup failed"; exit 1; }
+code="$(curl -s --noproxy '*' -o "$TMP/unrouted.json" -w '%{http_code}' "$BASE/api/no-such-endpoint")"
+grep -q '"ok":false' "$TMP/unrouted.json" && [ "$code" = "404" ] \
+  || { echo "unrouted /api path did not answer 404 JSON"; exit 1; }
 
 if [ -f "$TMP/pid" ]; then kill "$(cat "$TMP/pid")" 2>/dev/null || true; fi
 rm -rf "$TMP"
