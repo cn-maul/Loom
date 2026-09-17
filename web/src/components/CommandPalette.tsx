@@ -12,6 +12,11 @@ import { cn } from '../lib/utils';
  * the directory page; with the palette any page reaches a person in one
  * keystroke. Matching happens client-side: a personal CRM's person list is
  * small, and server search would add latency on every keystroke.
+ *
+ * The layer stays mounted and is driven by `data-state`, so the glass
+ * materialises on the way in and dissolves along the same path on the way
+ * out — and re-opening mid-dismissal reverses from where it is instead of
+ * restarting (CSS transitions, not keyframes).
  */
 export default function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
@@ -81,19 +86,21 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
     listRef.current?.children[cursor]?.scrollIntoView({ block: 'nearest' });
   }, [cursor]);
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-4 pt-[10vh] backdrop-blur-sm" onClick={onClose}>
+    <div
+      data-state={open ? 'open' : 'closed'}
+      className="al-scrim fixed inset-0 z-50 flex items-start justify-center p-4 pt-[10vh]"
+      onClick={onClose}
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-label="全局搜索"
-        className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+        className="al-sheet w-full max-w-lg overflow-hidden rounded-2xl bg-card/85 shadow-overlay"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="relative border-b border-border">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/60" />
+        <div className="relative border-b border-hairline">
+          <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
           <input
             ref={inputRef}
             value={query}
@@ -102,13 +109,13 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
               setCursor(0);
             }}
             placeholder="搜索人物…（按分类、组织、职位也能匹配）"
-            className="w-full bg-transparent py-4 pl-10 pr-4 text-[15px] text-foreground outline-none"
+            className="w-full bg-transparent py-[18px] pl-11 pr-4 text-[15px] text-foreground outline-none placeholder:text-ink-4"
           />
         </div>
 
-        <div className="max-h-[50vh] overflow-y-auto p-2">
+        <div className="scroll-slim max-h-[50vh] overflow-y-auto p-2">
           {error ? (
-            <div className="px-3 py-2">
+            <div className="px-2 py-2">
               <ErrorNote>{error}</ErrorNote>
             </div>
           ) : loading ? (
@@ -116,7 +123,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
               <Spinner label="载入人物…" />
             </div>
           ) : results.length === 0 ? (
-            <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+            <p className="px-3 py-8 text-center text-[13.5px] text-muted-foreground">
               {persons.length === 0 ? '还没有人物。' : `没有匹配「${query.trim()}」的人物。`}
             </p>
           ) : (
@@ -128,18 +135,22 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
                     onMouseEnter={() => setCursor(index)}
                     onClick={() => choose(person)}
                     className={cn(
-                      'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors',
-                      index === cursor ? 'bg-accent text-accent-foreground' : 'text-foreground',
+                      'flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors',
+                      index === cursor ? 'bg-fill text-foreground' : 'text-ink-2 hover:bg-fill/60',
                     )}
                   >
                     <Avatar name={person.name} id={person.id} size="sm" className="size-7 text-[10px]" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{person.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
+                      <span className="block truncate text-[13.5px] font-medium text-foreground">
+                        {person.name}
+                      </span>
+                      <span className="block truncate text-[12px] text-ink-3">
                         {[person.relation, person.org_name].filter(Boolean).join(' · ') || '未分类'}
                       </span>
                     </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{person.event_count} 条记录</span>
+                    <span className="shrink-0 text-[11.5px] tabular-nums text-ink-4">
+                      {person.event_count} 条记录
+                    </span>
                   </button>
                 </li>
               ))}
@@ -147,7 +158,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
+        <div className="flex items-center justify-between border-t border-hairline px-4 py-2.5 text-[11px] text-ink-3">
           <span>↑↓ 选择 · Enter 打开</span>
           <span>Esc 关闭</span>
         </div>

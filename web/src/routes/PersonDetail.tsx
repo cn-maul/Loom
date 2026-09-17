@@ -11,6 +11,7 @@ import { Textarea } from '../components/ui/textarea';
 import { organizationApi, personApi, reportApi } from '../api/client';
 import { getPortraitState, startPortrait, subscribePortrait } from '../lib/portraitStore';
 import { Avatar, EmptyState, SectionCard } from '../components/layout';
+import { useEnterState } from '../lib/overlay';
 import type { Event, Organization, Person, Trait } from '../api/types';
 import { fullDate, shortDate, todayISO } from '../format';
 
@@ -54,6 +55,9 @@ export default function PersonDetail() {
   const [recordOpen, setRecordOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [question, setQuestion] = useState('');
+  // Both layers mount already-open, so they need the frame to transition from.
+  const recordState = useEnterState(recordOpen);
+  const askState = useEnterState(askOpen);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -173,25 +177,26 @@ export default function PersonDetail() {
         </div>
       ) : null}
 
-      {/* Headline: who this is, plus the two actions worth reaching from here. */}
-      <div className="mb-5 rounded-xl border border-border bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      {/* Headline: who this is, plus the two actions worth reaching from here.
+          One white panel — the portrait does not need a bordered box of its own. */}
+      <section className="panel mb-5">
+        <div className="flex flex-wrap items-start justify-between gap-4 p-5">
           <div className="flex min-w-0 gap-4">
             <Avatar name={person.name} id={person.id} size="lg" />
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-semibold tracking-tight text-foreground">{person.name}</h1>
+                <h1 className="text-[clamp(20px,2.6vw,26px)] font-bold leading-[1.15] tracking-[-0.03em] text-foreground">
+                  {person.name}
+                </h1>
                 {person.is_self ? (
                   <Badge variant="secondary">我 · 系统保留</Badge>
                 ) : person.relation ? (
-                  <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
-                    {person.relation}
-                  </span>
+                  <Badge variant="secondary">{person.relation}</Badge>
                 ) : null}
               </div>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-1.5 text-[13px] leading-[1.6] text-muted-foreground">
                 {[currentOrg?.name, person.position].filter(Boolean).join(' · ') || '未填写组织与职位'} · 建档于{' '}
-                {fullDate(person.created_at)}
+                <span className="tabular-nums">{fullDate(person.created_at)}</span>
               </p>
             </div>
           </div>
@@ -207,11 +212,11 @@ export default function PersonDetail() {
             </Button>
           </div>
         </div>
-      </div>
+      </section>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         {/* —— 左 2/3：概览与时间线 —— */}
-        <div className="min-w-0 space-y-5">
+        <div className="min-w-0 space-y-9">
           <SectionCard
             title="人物概览"
             actions={
@@ -223,39 +228,48 @@ export default function PersonDetail() {
             {profileBusy ? (
               <Spinner label="AI 正在汇总近 30 天的记录…（离开此页生成也会继续）" />
             ) : portrait.status === 'error' ? (
-              <p className="text-sm text-muted-foreground">上次生成失败：{portrait.message}，可重试。</p>
+              <p className="text-[13.5px] leading-[1.7] text-muted-foreground">
+                上次生成失败：{portrait.message}，可重试。
+              </p>
             ) : portrait.status === 'done' && portrait.snapshot.status === 'failed' ? (
-              <p className="text-sm text-muted-foreground">上次生成失败：{portrait.snapshot.failure_reason || '未知原因'}，可重试。</p>
+              <p className="text-[13.5px] leading-[1.7] text-muted-foreground">
+                上次生成失败：{portrait.snapshot.failure_reason || '未知原因'}，可重试。
+              </p>
             ) : portrait.status === 'done' ? (
               <>
-                <p className="text-sm leading-7 text-foreground">{portrait.snapshot.summary}</p>
-                <p className="mt-3 text-xs text-muted-foreground">
-                  统计窗口 {portrait.snapshot.start} ~ {portrait.snapshot.end} · 生成于 {fullDate(portrait.snapshot.generated_at)}
+                <p className="text-[14px] leading-[1.85] text-ink-2">{portrait.snapshot.summary}</p>
+                <p className="mt-3.5 text-[12px] tabular-nums text-ink-3">
+                  统计窗口 {portrait.snapshot.start} ~ {portrait.snapshot.end} · 生成于{' '}
+                  {fullDate(portrait.snapshot.generated_at)}
                 </p>
               </>
             ) : profile && profile.status === 'succeeded' && profile.summary ? (
               <>
-                <p className="text-sm leading-7 text-foreground">{profile.summary}</p>
-                <p className="mt-3 text-xs text-muted-foreground">
+                <p className="text-[14px] leading-[1.85] text-ink-2">{profile.summary}</p>
+                <p className="mt-3.5 text-[12px] tabular-nums text-ink-3">
                   统计窗口 {profile.start} ~ {profile.end} · 生成于 {fullDate(profile.generated_at)}
                 </p>
               </>
             ) : profile && profile.status === 'failed' ? (
-              <p className="text-sm text-muted-foreground">上次生成失败：{profile.failure_reason || '未知原因'}，可重试。</p>
+              <p className="text-[13.5px] leading-[1.7] text-muted-foreground">
+                上次生成失败：{profile.failure_reason || '未知原因'}，可重试。
+              </p>
             ) : (
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[13.5px] leading-[1.7] text-muted-foreground">
                 还没有画像。点右上角「生成画像」，AI 会汇总近 30 天与 TA 有关的记录，写成一段画像。
               </p>
             )}
 
-            <div className="mt-4 border-t border-border pt-3">
+            <div className="mt-4 border-t border-hairline pt-3.5">
               {person.is_self ? (
-                <p className="text-xs text-muted-foreground">「我」是系统保留人物，代表使用系统的人，不能删除。</p>
+                <p className="text-[12px] leading-[1.6] text-ink-3">
+                  「我」是系统保留人物，代表使用系统的人，不能删除。
+                </p>
               ) : (
                 <Button
                   variant="outline"
                   size="sm"
-                  className="text-muted-foreground hover:border-red-300 hover:text-red-600"
+                  className="text-destructive hover:bg-destructive/10"
                   onClick={() => void removePerson()}
                 >
                   删除这个人物（不可撤销）
@@ -267,21 +281,23 @@ export default function PersonDetail() {
           <SectionCard
             title="时间线"
             actions={
-              <Link to="/events" className="text-xs text-muted-foreground hover:text-primary">
+              <Link to="/events" className="text-[12.5px] text-ink-3 transition-colors hover:text-primary">
                 全部记录
               </Link>
             }
+            bodyClassName="p-0"
           >
             <EventTimeline events={events} />
           </SectionCard>
         </div>
 
         {/* —— 右 1/3：AI 画像的采纳与剔除 —— */}
-        <aside className="min-w-0 space-y-5">
+        <aside className="min-w-0 space-y-9">
           <SectionCard
             title="AI 画像"
             description="✓ 采纳，✗ 剔除；新记录会自动更新，依据失效的条目会提示重算"
-            actions={<span className="text-xs text-muted-foreground">{traits.length} 条</span>}
+            actions={<span className="text-[12px] tabular-nums text-ink-3">{traits.length} 条</span>}
+            bodyClassName="p-0"
           >
             <TraitList
               traits={traits}
@@ -308,16 +324,23 @@ export default function PersonDetail() {
       {/* —— 新增记录：弹出式窗口 —— */}
       {recordOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-4 pt-[8vh] backdrop-blur-sm"
+          data-state={recordState}
+          className="al-scrim fixed inset-0 z-50 flex items-start justify-center p-4 pt-[8vh]"
+          role="dialog"
+          aria-modal="true"
           onClick={() => setRecordOpen(false)}
         >
           <div
-            className="w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+            className="al-sheet w-full max-w-xl overflow-hidden rounded-2xl bg-card/85 shadow-overlay"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-              <h2 className="text-sm font-semibold text-foreground">新增记录 · {person.name}</h2>
-              <button onClick={() => setRecordOpen(false)} aria-label="关闭" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+            <div className="flex items-center justify-between border-b border-hairline px-5 py-3.5">
+              <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">新增记录 · {person.name}</h2>
+              <button
+                onClick={() => setRecordOpen(false)}
+                aria-label="关闭"
+                className="flex size-8 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-fill hover:text-foreground"
+              >
                 <X className="size-4" />
               </button>
             </div>
@@ -339,16 +362,23 @@ export default function PersonDetail() {
       {/* —— 问一下：弹出式提问窗口 —— */}
       {askOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-4 pt-[14vh] backdrop-blur-sm"
+          data-state={askState}
+          className="al-scrim fixed inset-0 z-50 flex items-start justify-center p-4 pt-[14vh]"
+          role="dialog"
+          aria-modal="true"
           onClick={() => setAskOpen(false)}
         >
           <div
-            className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+            className="al-sheet w-full max-w-lg overflow-hidden rounded-2xl bg-card/85 shadow-overlay"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-              <h2 className="text-sm font-semibold text-foreground">问一下 · {person.name}</h2>
-              <button onClick={() => setAskOpen(false)} aria-label="关闭" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+            <div className="flex items-center justify-between border-b border-hairline px-5 py-3.5">
+              <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">问一下 · {person.name}</h2>
+              <button
+                onClick={() => setAskOpen(false)}
+                aria-label="关闭"
+                className="flex size-8 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-fill hover:text-foreground"
+              >
                 <X className="size-4" />
               </button>
             </div>
@@ -359,10 +389,10 @@ export default function PersonDetail() {
                 onChange={(e) => setQuestion(e.target.value)}
                 rows={4}
                 placeholder={`关于${person.name}的问题，例如「下次找他帮忙该怎么开口」`}
-                className="resize-y text-base leading-6"
+                className="resize-y text-[15px] leading-[1.75]"
               />
-              <p className="mt-2 text-xs text-muted-foreground">回答会引用 TA 的记录和关系。</p>
-              <div className="mt-3 flex justify-end gap-2">
+              <p className="mt-2 text-[12px] text-ink-3">回答会引用 TA 的记录和关系。</p>
+              <div className="mt-3.5 flex justify-end gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setAskOpen(false)}>
                   取消
                 </Button>

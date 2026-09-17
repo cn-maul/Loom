@@ -3,23 +3,27 @@ import { cn } from '../lib/utils';
 
 /** The three states the extraction pipeline reports, as the list and the detail
  *  page both show them. A missing status means the row predates the column and
- *  is treated as pending, which is what the repository does too. */
+ *  is treated as pending, which is what the repository does too.
+ *
+ *  Tint plates, not outlined chips: a status is information, so it gets a
+ *  translucent Apple system tint that reads on the white panel and on the dark
+ *  ground alike. */
 const STATUS_META: Record<string, { label: string; className: string }> = {
   succeeded: {
     label: '已提取',
-    className: 'border-emerald-300/60 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-950/40 dark:text-emerald-300',
+    className: 'bg-live-bg text-live-text',
   },
   succeeded_with_warnings: {
     label: '已提取 · 有警告',
-    className: 'border-amber-300/60 bg-amber-50 text-amber-700 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-300',
+    className: 'bg-heat-bg text-heat-text',
   },
   pending: {
     label: '待提取',
-    className: 'border-border bg-muted text-muted-foreground',
+    className: 'bg-fill text-ink-2',
   },
   failed: {
     label: '提取失败',
-    className: 'border-red-300/60 bg-red-50 text-red-700 dark:border-red-500/40 dark:bg-red-950/40 dark:text-red-300',
+    className: 'bg-destructive/10 text-destructive',
   },
 };
 
@@ -34,7 +38,11 @@ export function EventStatusBadge({ event, className }: { event: Event; className
   const tip = warn ? event.pipeline_warnings.join('\n') : event.extraction_error;
   return (
     <span
-      className={cn('shrink-0 rounded-full border px-2 py-0.5 text-xs', shown.className, className)}
+      className={cn(
+        'shrink-0 rounded-full px-2.5 py-[3px] text-[11.5px] font-medium',
+        shown.className,
+        className,
+      )}
       title={tip || undefined}
     >
       {event.manually_edited === 1 ? `${shown.label} · 已人工修订` : shown.label}

@@ -3,7 +3,8 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { ErrorNote, Notice, Spinner, controlClass } from '../components/ui';
 import { aiApi, authToken, configApi } from '../api/client';
-import { PageHeader } from '../components/layout';
+import { Field, PageHeader, SectionCard } from '../components/layout';
+import { cn } from '../lib/utils';
 import type { LLMConfig, PrivacyInfo } from '../api/types';
 
 const TABS = [
@@ -142,272 +143,261 @@ export default function Settings() {
         }
       />
 
-      {error ? <ErrorNote>{error}</ErrorNote> : null}
-      {notice ? <Notice>{notice}</Notice> : null}
-      {message ? <p className="text-sm text-green-700 dark:text-green-400">{message}</p> : null}
+      {error ? (
+        <div className="mb-5">
+          <ErrorNote>{error}</ErrorNote>
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="mb-5">
+          <Notice>{notice}</Notice>
+        </div>
+      ) : null}
+      {message ? <p className="mb-5 text-[13px] leading-[1.7] text-live-text">{message}</p> : null}
 
       <div className="flex gap-6">
-        <aside className="w-40 shrink-0 space-y-1">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                tab === t.id ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+        {/* Wayfinding: the sections are a list, so the rail is a list of rows
+            on a quiet fill — no coloured plate, no left bar. */}
+        <aside className="w-40 shrink-0">
+          <nav className="space-y-0.5">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={cn(
+                  'flex h-9 w-full items-center rounded-md px-3 text-left text-[13.5px] transition-colors',
+                  tab === t.id
+                    ? 'bg-fill font-semibold text-foreground'
+                    : 'text-ink-2 hover:bg-fill/60 hover:text-foreground',
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
         </aside>
 
-        <section className="min-w-0 flex-1 space-y-4">
+        <section className="min-w-0 flex-1 space-y-9">
           {tab === 'llm' ? (
-            <div className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm">
+            <section className="panel space-y-3.5 p-5">
               {/* 第一行：协议（窄下拉）+ 对话 API 地址 */}
-              <div className="grid grid-cols-[9rem_minmax(0,1fr)] gap-3">
-                <label className="block text-sm text-muted-foreground">
-                  协议
-                  <select
-                    value={config.protocol}
-                    onChange={(e) => patch('protocol', e.target.value)}
-                    className={`${controlClass} mt-1 text-foreground`}
-                  >
+              <div className="grid grid-cols-[9rem_minmax(0,1fr)] gap-3.5">
+                <Field label="协议">
+                  <select value={config.protocol} onChange={(e) => patch('protocol', e.target.value)} className={controlClass}>
                     <option value="openai">OpenAI 兼容</option>
                     <option value="anthropic">Anthropic</option>
                   </select>
-                </label>
-                <label className="block text-sm text-muted-foreground">
-                  对话 API 地址
+                </Field>
+                <Field label="对话 API 地址" hint="本地 Ollama / LM Studio 填本机地址">
                   <input
                     value={String(config.endpoint ?? '')}
                     onChange={(e) => patch('endpoint', e.target.value)}
                     placeholder="https://api.openai.com/v1 或 http://localhost:11434"
-                    className={`${controlClass} mt-1`}
+                    className={controlClass}
                   />
-                  <span className="mt-1 block text-xs text-muted-foreground/70">本地 Ollama / LM Studio 填本机地址</span>
-                </label>
+                </Field>
               </div>
 
               {/* 第二行：API Key + 补全 token 上限 */}
-              <div className="grid grid-cols-[minmax(0,1fr)_11rem] gap-3">
-                <label className="block text-sm text-muted-foreground">
-                  对话 API Key
+              <div className="grid grid-cols-[minmax(0,1fr)_11rem] gap-3.5">
+                <Field label="对话 API Key" hint="本地 Ollama 留空">
                   <input
                     type="password"
                     value={String(config.api_key ?? '')}
                     onChange={(e) => patch('api_key', e.target.value)}
-                    className={`${controlClass} mt-1`}
+                    className={controlClass}
                   />
-                  <span className="mt-1 block text-xs text-muted-foreground/70">本地 Ollama 留空</span>
-                </label>
-                <label className="block text-sm text-muted-foreground">
-                  单次补全 token 上限
+                </Field>
+                <Field label="单次补全 token 上限" hint="太小会截断长建议 JSON">
                   <input
                     type="number"
                     value={String(config.max_tokens ?? '')}
                     onChange={(e) => patch('max_tokens', Number(e.target.value) || 0)}
-                    className={`${controlClass} mt-1`}
+                    className={controlClass}
                   />
-                  <span className="mt-1 block text-xs text-muted-foreground/70">太小会截断长建议 JSON</span>
-                </label>
+                </Field>
               </div>
 
-              {/* 第三行：两个模型 + 获取模型按钮 */}
-              <div className="flex items-end gap-3">
-                <label className="block min-w-0 flex-1 text-sm text-muted-foreground">
-                  事件提取模型
+              {/* 第三行：两个模型 */}
+              <div className="grid gap-3.5 sm:grid-cols-2">
+                <Field label="事件提取模型" hint="抽取摘要、情绪、承诺，建议用快的模型">
                   <input
                     list="llm-model-list"
                     value={String(config.extract_model ?? '')}
                     onChange={(e) => patch('extract_model', e.target.value)}
                     placeholder="输入或从下拉选择"
-                    className={`${controlClass} mt-1`}
+                    className={controlClass}
                   />
-                  <span className="mt-1 block text-xs text-muted-foreground/70">抽取摘要、情绪、承诺，建议用快的模型</span>
-                </label>
-                <label className="block min-w-0 flex-1 text-sm text-muted-foreground">
-                  建议/周报模型
+                </Field>
+                <Field label="建议/周报模型" hint="负责推理和长文，建议用更强的模型">
                   <input
                     list="llm-model-list"
                     value={String(config.advice_model ?? '')}
                     onChange={(e) => patch('advice_model', e.target.value)}
                     placeholder="输入或从下拉选择"
-                    className={`${controlClass} mt-1`}
+                    className={controlClass}
                   />
-                  <span className="mt-1 block text-xs text-muted-foreground/70">负责推理和长文，建议用更强的模型</span>
-                </label>
-                <Button variant="outline" onClick={() => void fetchModels()} disabled={fetchingModels} className="mb-6 shrink-0">
+                </Field>
+              </div>
+
+              <div>
+                <Button variant="outline" onClick={() => void fetchModels()} disabled={fetchingModels}>
                   {fetchingModels ? '获取中…' : '获取模型'}
                 </Button>
               </div>
+
               <datalist id="llm-model-list">
                 {modelIds.map((id) => (
                   <option key={id} value={id} />
                 ))}
               </datalist>
-            </div>
+            </section>
           ) : null}
 
           {tab === 'embedding' ? (
-            <div className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm">
+            <section className="panel space-y-3.5 p-5">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-foreground">Embedding（语义检索）</h2>
+                <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">Embedding（语义检索）</h2>
                 {embedding === null ? (
                   <Badge variant="secondary">向量状态未知</Badge>
                 ) : embedding ? (
-                  <Badge variant="secondary" className="border-transparent bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400">
-                    向量检索可用
-                  </Badge>
+                  <Badge className="bg-live-bg text-live-text">向量检索可用</Badge>
                 ) : (
-                  <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-300">
-                    向量检索不可用
-                  </Badge>
+                  <Badge className="bg-heat-bg text-heat-text">向量检索不可用</Badge>
                 )}
               </div>
 
               {/* 第一行：Embedding API 地址 */}
-              <label className="block text-sm text-muted-foreground">
-                Embedding API 地址
+              <Field label="Embedding API 地址" hint="语义检索的独立端点；本地 Ollama / LM Studio 填本机地址">
                 <input
                   value={String(config.embed_endpoint ?? '')}
                   onChange={(e) => patch('embed_endpoint', e.target.value)}
                   placeholder="留空则沿用对话 API 地址，如 http://localhost:11434"
-                  className={`${controlClass} mt-1`}
+                  className={controlClass}
                 />
-                <span className="mt-1 block text-xs text-muted-foreground/70">语义检索的独立端点；本地 Ollama / LM Studio 填本机地址</span>
-              </label>
+              </Field>
 
               {/* 第二行：Embedding API Key + 维度 */}
-              <div className="grid grid-cols-[minmax(0,1fr)_11rem] gap-3">
-                <label className="block text-sm text-muted-foreground">
-                  Embedding API Key
+              <div className="grid grid-cols-[minmax(0,1fr)_11rem] gap-3.5">
+                <Field label="Embedding API Key" hint="留空则沿用对话 API Key">
                   <input
                     type="password"
                     value={String(config.embed_api_key ?? '')}
                     onChange={(e) => patch('embed_api_key', e.target.value)}
-                    className={`${controlClass} mt-1`}
+                    className={controlClass}
                   />
-                  <span className="mt-1 block text-xs text-muted-foreground/70">留空则沿用对话 API Key</span>
-                </label>
-                <label className="block text-sm text-muted-foreground">
-                  Embedding 维度
+                </Field>
+                <Field label="Embedding 维度" hint="改这里需要重建索引">
                   <input
                     type="number"
                     value={String(config.embed_dim ?? '')}
                     onChange={(e) => patch('embed_dim', Number(e.target.value) || 0)}
-                    className={`${controlClass} mt-1`}
+                    className={controlClass}
                   />
-                  <span className="mt-1 block text-xs text-muted-foreground/70">改这里需要重建索引</span>
-                </label>
+                </Field>
               </div>
 
-              {/* 第三行：Embedding 模型 + 检测 / 重建按钮 */}
-              <div className="flex items-end gap-3">
-                <label className="block min-w-0 flex-1 text-sm text-muted-foreground">
-                  Embedding 模型
-                  <input
-                    value={String(config.embed_model ?? '')}
-                    onChange={(e) => patch('embed_model', e.target.value)}
-                    placeholder="如 nomic-embed-text"
-                    className={`${controlClass} mt-1`}
-                  />
-                  <span className="mt-1 block text-xs text-muted-foreground/70">留空则没有语义检索，只用近期记录兜底</span>
-                </label>
-                <Button variant="outline" onClick={checkEmbedding} disabled={checking} className="mb-6 shrink-0">
+              {/* 第三行：Embedding 模型 */}
+              <Field label="Embedding 模型" hint="留空则没有语义检索，只用近期记录兜底">
+                <input
+                  value={String(config.embed_model ?? '')}
+                  onChange={(e) => patch('embed_model', e.target.value)}
+                  placeholder="如 nomic-embed-text"
+                  className={controlClass}
+                />
+              </Field>
+
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={checkEmbedding} disabled={checking}>
                   {checking ? '检测中…' : '检测 Embedding'}
                 </Button>
-                <Button variant="outline" onClick={reindex} disabled={reindexing} className="mb-6 shrink-0">
+                <Button variant="outline" onClick={reindex} disabled={reindexing}>
                   {reindexing ? '重建中，可能需要几分钟…' : '重建向量索引'}
                 </Button>
               </div>
-            </div>
+            </section>
           ) : null}
 
           {tab === 'rerank' ? (
-            <div className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-              <h2 className="text-sm font-semibold text-foreground">Rerank（检索重排）</h2>
+            <section className="panel space-y-3.5 p-5">
+              <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">Rerank（检索重排）</h2>
 
               {/* 第一行：Rerank API 地址 */}
-              <label className="block text-sm text-muted-foreground">
-                Rerank API 地址
+              <Field
+                label="Rerank API 地址"
+                hint="重排与向量模型不一家时（Jina、Cohere 等）在这里单独填，Cohere 格式 /rerank 接口"
+              >
                 <input
                   value={String(config.rerank_endpoint ?? '')}
                   onChange={(e) => patch('rerank_endpoint', e.target.value)}
                   placeholder="留空则沿用 Embedding API 地址"
-                  className={`${controlClass} mt-1`}
+                  className={controlClass}
                 />
-                <span className="mt-1 block text-xs text-muted-foreground/70">
-                  重排与向量模型不一家时（Jina、Cohere 等）在这里单独填，Cohere 格式 /rerank 接口
-                </span>
-              </label>
+              </Field>
 
               {/* 第二行：Rerank API Key */}
-              <label className="block text-sm text-muted-foreground">
-                Rerank API Key
+              <Field label="Rerank API Key" hint="留空则沿用 Embedding API Key">
                 <input
                   type="password"
                   value={String(config.rerank_api_key ?? '')}
                   onChange={(e) => patch('rerank_api_key', e.target.value)}
-                  placeholder="留空则沿用 Embedding API Key"
-                  className={`${controlClass} mt-1`}
+                  className={controlClass}
                 />
-              </label>
+              </Field>
 
               {/* 第三行：Rerank 模型 */}
-              <label className="block text-sm text-muted-foreground">
-                Rerank 模型
+              <Field label="Rerank 模型" hint="配置后，建议生成的检索证据先经重排再进提示词；检索时失败会如实报告，不静默降级">
                 <input
                   value={String(config.rerank_model ?? '')}
                   onChange={(e) => patch('rerank_model', e.target.value)}
                   placeholder="留空关闭，如 bge-reranker-v2-m3"
-                  className={`${controlClass} mt-1`}
+                  className={controlClass}
                 />
-                <span className="mt-1 block text-xs text-muted-foreground/70">
-                  配置后，建议生成的检索证据先经重排再进提示词；检索时失败会如实报告，不静默降级
-                </span>
-              </label>
-            </div>
+              </Field>
+            </section>
           ) : null}
 
           {tab === 'privacy' && privacy ? (
-            <div className="space-y-4">
-              <div className="space-y-3 rounded-xl border border-border bg-card p-5 shadow-sm">
-                <h2 className="text-sm font-semibold text-foreground">数据去向</h2>
-                <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
-                  <dt className="text-muted-foreground">服务监听地址</dt>
-                  <dd className="font-mono text-foreground">{privacy.listens_on}</dd>
-                  <dt className="text-muted-foreground">AI 端点</dt>
-                  <dd className="font-mono text-foreground">
-                    {privacy.ai_endpoint}{' '}
+            <div className="space-y-9">
+              <SectionCard title="数据去向">
+                <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2.5">
+                  <dt className="text-[13px] text-ink-3">服务监听地址</dt>
+                  <dd className="font-mono text-[13px] text-foreground">{privacy.listens_on}</dd>
+                  <dt className="text-[13px] text-ink-3">AI 端点</dt>
+                  <dd className="flex flex-wrap items-center gap-1.5 font-mono text-[13px] text-foreground">
+                    {privacy.ai_endpoint}
                     {privacy.ai_endpoint_external ? (
-                      <Badge className="ml-1 border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">外部</Badge>
+                      <Badge className="bg-heat-bg font-sans text-heat-text">外部</Badge>
                     ) : (
-                      <Badge variant="secondary" className="ml-1">本机</Badge>
+                      <Badge variant="secondary" className="font-sans">
+                        本机
+                      </Badge>
                     )}
                   </dd>
-                  <dt className="text-muted-foreground">记录原文发送给模型</dt>
-                  <dd className="text-foreground">是（提取功能必然包含原文）</dd>
-                  <dt className="text-muted-foreground">外部端点开关 (allow_remote)</dt>
-                  <dd className="text-foreground">{privacy.allow_remote ? '允许发送到外部端点' : '已关闭：拒绝发送到任何非本机端点'}</dd>
-                  <dt className="text-muted-foreground">API 访问控制</dt>
-                  <dd className="text-foreground">{privacy.auth_required ? '已开启（需要访问令牌）' : '未开启'}</dd>
-                  <dt className="text-muted-foreground">备份加密</dt>
-                  <dd className="text-foreground">{privacy.backup_encrypted ? '已开启（AES-256-GCM）' : '未开启（快照为明文）'}</dd>
+                  <dt className="text-[13px] text-ink-3">记录原文发送给模型</dt>
+                  <dd className="text-[13px] text-foreground">是（提取功能必然包含原文）</dd>
+                  <dt className="text-[13px] text-ink-3">外部端点开关 (allow_remote)</dt>
+                  <dd className="text-[13px] text-foreground">
+                    {privacy.allow_remote ? '允许发送到外部端点' : '已关闭：拒绝发送到任何非本机端点'}
+                  </dd>
+                  <dt className="text-[13px] text-ink-3">API 访问控制</dt>
+                  <dd className="text-[13px] text-foreground">
+                    {privacy.auth_required ? '已开启（需要访问令牌）' : '未开启'}
+                  </dd>
+                  <dt className="text-[13px] text-ink-3">备份加密</dt>
+                  <dd className="text-[13px] text-foreground">
+                    {privacy.backup_encrypted ? '已开启（AES-256-GCM）' : '未开启（快照为明文）'}
+                  </dd>
                 </dl>
-                <p className="text-xs text-muted-foreground">
-                  该面板是事实陈述：改 allow_remote、auth_token、backup.passphrase 请直接编辑 config.yaml 并重启。
-                </p>
-              </div>
+              </SectionCard>
 
-              <div className="space-y-3 rounded-xl border border-border bg-card p-5 shadow-sm">
-                <h2 className="text-sm font-semibold text-foreground">本浏览器访问令牌</h2>
-                <p className="text-sm text-muted-foreground">
+              <SectionCard title="本浏览器访问令牌">
+                <p className="text-[13.5px] leading-[1.7] text-muted-foreground">
                   {privacy.auth_required
                     ? '服务器已开启访问控制。把令牌填在这里，它只保存在此浏览器的 localStorage，不会发给设置接口。'
                     : '服务器未开启访问控制，无需填写。'}
                 </p>
-                <div className="flex items-center gap-2">
+                <div className="mt-3.5 flex flex-wrap items-center gap-2">
                   <input
                     type="password"
                     value={tokenDraft}
@@ -439,10 +429,12 @@ export default function Settings() {
                     </Button>
                   ) : null}
                 </div>
-              </div>
+                <p className="mt-3.5 text-[12px] leading-[1.6] text-ink-3">
+                  该面板是事实陈述：改 allow_remote、auth_token、backup.passphrase 请直接编辑 config.yaml 并重启。
+                </p>
+              </SectionCard>
             </div>
           ) : null}
-
         </section>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { NotebookPen, Sparkles, Users } from 'lucide-react';
+import { NotebookPen } from 'lucide-react';
 import { QUICK_RECORD_EVENT, eventApi, personApi } from '../api/client';
 import type { Event, PersonWithActivity } from '../api/types';
 import { Avatar, EmptyState } from '../components/layout';
@@ -43,64 +43,74 @@ function groupByDay(events: Event[]): { date: string; items: Event[] }[] {
   return groups;
 }
 
-/** One record row. Person first, what happened second, AI extraction as quiet
- *  chips — the text is the protagonist, not the metadata. */
+/** One record row on the shared panel. Person first, what happened second;
+ *  the extracted fields are quiet tags, not a second layer of colour. */
 function RecordRow({ event, persons }: { event: Event; persons: PersonWithActivity[] }) {
   const person = persons.find((p) => p.id === event.person_id);
   const headline = eventHeadline(event.summary, event.raw_text);
   return (
-    <li className="group relative py-3.5">
+    <li className="group px-5 py-4 transition-colors hover:bg-hover">
       <div className="flex gap-3.5">
         {person ? (
           <Link to={`/persons/${person.id}`} className="shrink-0" title={person.name}>
             <Avatar name={person.name} id={person.id} size="md" />
           </Link>
         ) : (
-          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-track text-ink-3">
             <NotebookPen className="size-4" />
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             {person ? (
-              <Link to={`/persons/${person.id}`} className="text-sm font-medium text-foreground hover:text-primary">
+              <Link
+                to={`/persons/${person.id}`}
+                className="text-[14px] font-semibold tracking-[-0.01em] text-foreground hover:text-primary"
+              >
                 {person.name}
               </Link>
             ) : (
-              <span className="text-sm font-medium text-muted-foreground">未关联人物</span>
+              <span className="text-[14px] font-medium text-ink-3">未关联人物</span>
             )}
-            <span className="truncate text-xs text-muted-foreground">
+            <span className="truncate text-[12.5px] text-ink-3">
               {[person?.relation, person?.org_name].filter(Boolean).join(' · ')}
             </span>
             {event.record_type ? (
-              <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] leading-4 text-secondary-foreground">{event.record_type}</span>
+              <span className="rounded-full bg-fill px-2 py-[3px] text-[11px] leading-4 text-ink-2">
+                {event.record_type}
+              </span>
             ) : null}
             {event.extraction_status === 'pending' ? (
-              <span className="text-[11px] text-muted-foreground/70">提取中…</span>
+              <span className="text-[11px] text-ink-4">提取中…</span>
             ) : null}
             {event.extraction_status === 'failed' ? (
-              <span className="text-[11px] text-red-600 dark:text-red-400">提取失败</span>
+              <span className="text-[11px] font-medium text-destructive">提取失败</span>
             ) : null}
           </div>
-          <Link to={`/events/${event.id}`} className="mt-1 block">
-            <p className="line-clamp-2 text-[13.5px] leading-6 text-foreground/90 transition-colors group-hover:text-primary">
+          <Link to={`/events/${event.id}`} className="mt-1.5 block">
+            <p className="line-clamp-2 text-[13.5px] leading-[1.75] text-ink-2 transition-colors group-hover:text-foreground">
               {headline || '（原文待提取）'}
             </p>
           </Link>
-          {(event.promises.length > 0 || event.my_feeling) && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+          {event.promises.length > 0 || event.my_feeling ? (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
               {event.promises.map((promise, index) => (
-                <span key={index} className="inline-flex items-center gap-1 text-[11px] text-primary">
-                  <span className="size-1 rounded-full bg-primary/70" />
+                <span
+                  key={index}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-fill px-2.5 py-[3px] text-[11.5px] text-ink-2"
+                >
+                  <span className="font-medium text-foreground">承诺</span>
                   {promise.who || '对方'}：{promise.what}
                   {promise.deadline ? `（${promise.deadline}）` : ''}
                 </span>
               ))}
-              {event.my_feeling ? <span className="text-[11px] text-muted-foreground">感受：{event.my_feeling}</span> : null}
+              {event.my_feeling ? (
+                <span className="text-[11.5px] text-ink-3">感受：{event.my_feeling}</span>
+              ) : null}
             </div>
-          )}
+          ) : null}
         </div>
-        <span className="shrink-0 pt-1 text-[11px] tabular-nums text-muted-foreground/70">
+        <span className="shrink-0 pt-0.5 text-[11.5px] tabular-nums text-ink-4">
           {event.event_date.slice(5, 10).replace('-', '/')}
         </span>
       </div>
@@ -108,30 +118,38 @@ function RecordRow({ event, persons }: { event: Event; persons: PersonWithActivi
   );
 }
 
-/** Right-rail person row with a status dot: green = recent, amber = fading. */
+/** Compact rail row with a status dot: green = recently in touch, orange = fading. */
 function PersonRow({ person }: { person: PersonWithActivity }) {
   const days = daysSince(person.last_event_date);
   const stale = days === null || days >= STALE_DAYS;
   return (
     <li>
-      <Link to={`/persons/${person.id}`} className="flex items-center gap-3 rounded-xl px-2.5 py-2 transition-colors hover:bg-muted">
+      <Link
+        to={`/persons/${person.id}`}
+        className="flex items-center gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-hover"
+      >
         <span className="relative">
           <Avatar name={person.name} id={person.id} size="sm" />
           <span
             aria-hidden
             className={cn(
               'absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-card',
-              stale ? 'bg-amber-400' : 'bg-emerald-400',
+              stale ? 'bg-heat' : 'bg-live',
             )}
           />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-foreground">{person.name}</span>
-          <span className="block truncate text-xs text-muted-foreground">
+          <span className="block truncate text-[13.5px] font-medium text-foreground">{person.name}</span>
+          <span className="block truncate text-[12px] text-ink-3">
             {[person.relation, person.org_name].filter(Boolean).join(' · ') || '未分类'}
           </span>
         </span>
-        <span className={cn('shrink-0 text-[11px]', stale ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+        <span
+          className={cn(
+            'shrink-0 text-[11.5px]',
+            stale ? 'font-medium text-heat-text' : 'text-ink-3',
+          )}
+        >
           {days === null ? '从未记录' : days === 0 ? '今天' : days === 1 ? '昨天' : `${days} 天前`}
         </span>
       </Link>
@@ -139,9 +157,10 @@ function PersonRow({ person }: { person: PersonWithActivity }) {
   );
 }
 
-/** The landing page: a quiet hero, a day-grouped story of recent records, and
- *  a contacts rail that puts "people you are losing" before "people you just
- *  saw". No cumulative counters — they answer nobody's question. */
+/** The landing page: a quiet hero, a day-grouped story of recent records on one
+ *  continuous surface, and a contacts rail that puts "people you are losing"
+ *  before "people you just saw". No cumulative counters — they answer nobody's
+ *  question. */
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([]);
   const [persons, setPersons] = useState<PersonWithActivity[]>([]);
@@ -202,41 +221,42 @@ export default function Home() {
   const openRecord = () => window.dispatchEvent(new CustomEvent(QUICK_RECORD_EVENT));
 
   return (
-    <div className="mx-auto max-w-5xl">
-      {/* Hero: greeting, the one number that matters, one action. */}
-      <div className="mb-8 overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-card to-card p-7 shadow-sm">
-        <p className="text-xs font-medium uppercase tracking-widest text-primary/80">
+    <div>
+      {/* Hero: the date, the one number that matters, one action. No card, no
+          gradient — the type carries it. */}
+      <section className="mb-10">
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-ink-3">
           {now.getMonth() + 1} 月 {now.getDate()} 日 · 周{WEEKDAYS[now.getDay()]}
         </p>
-        <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">今天</h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">
-              {weekTotal === null
-                ? '看看最近发生了什么'
-                : weekTotal > 0
-                  ? `本周记了 ${weekTotal} 条 · 联系 ${recent.filter((p) => {
-                      const days = daysSince(p.last_event_date);
-                      return days !== null && days < 7;
-                    }).length} 个人`
-                  : '本周还没有记录，从一个瞬间开始'}
-            </p>
-          </div>
-          <Button size="lg" onClick={openRecord} className="shadow-md shadow-primary/20">
+        <h1 className="mt-4 text-[clamp(28px,5vw,42px)] font-bold leading-[1.08] tracking-[-0.03em] text-foreground">
+          今天
+        </h1>
+        <p className="mt-3.5 max-w-[52ch] text-[15px] leading-[1.7] text-muted-foreground">
+          {weekTotal === null
+            ? '看看最近发生了什么'
+            : weekTotal > 0
+              ? `本周记了 ${weekTotal} 条 · 联系 ${recent.filter((p) => {
+                  const days = daysSince(p.last_event_date);
+                  return days !== null && days < 7;
+                }).length} 个人`
+              : '本周还没有记录，从一个瞬间开始'}
+        </p>
+        <div className="mt-6">
+          <Button size="lg" onClick={openRecord}>
             <NotebookPen className="size-4" />
             记一笔
           </Button>
         </div>
-      </div>
+      </section>
 
       {error ? (
-        <div className="mb-5">
+        <div className="mb-6">
           <ErrorNote>{error}</ErrorNote>
         </div>
       ) : null}
 
-      <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
-        {/* Recent records as a day-grouped story. */}
+      <div className="grid gap-9 lg:grid-cols-[minmax(0,1fr)_290px]">
+        {/* Recent records as a day-grouped story on one continuous surface. */}
         <div>
           {events.length === 0 ? (
             <EmptyState
@@ -252,23 +272,24 @@ export default function Home() {
             />
           ) : (
             groups.map((group) => (
-              <section key={group.date} className="mb-6">
-                <h2 className="mb-1 flex items-center gap-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <section key={group.date} className="mb-7">
+                <h2 className="mb-2.5 px-[18px] text-[11.5px] font-semibold uppercase tracking-[0.14em] text-ink-3">
                   {dayLabel(group.date)}
-                  <span className="h-px flex-1 bg-border" />
                 </h2>
-                <ul className="divide-y divide-border/60">
-                  {group.items.map((event) => (
-                    <RecordRow key={event.id} event={event} persons={persons} />
-                  ))}
-                </ul>
+                <div className="panel">
+                  <ul className="panel-rows">
+                    {group.items.map((event) => (
+                      <RecordRow key={event.id} event={event} persons={persons} />
+                    ))}
+                  </ul>
+                </div>
               </section>
             ))
           )}
           {events.length > 0 ? (
             <Link
               to="/events"
-              className="mt-2 inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-primary"
+              className="inline-flex items-center gap-1 text-[13.5px] text-ink-3 transition-colors hover:text-primary"
             >
               查看全部记录 →
             </Link>
@@ -276,67 +297,76 @@ export default function Home() {
         </div>
 
         {/* Contacts rail: the actionable half first. */}
-        <aside className="space-y-6">
+        <aside className="space-y-9">
           {fading.length > 0 ? (
-            <div>
-              <h2 className="mb-1.5 px-1 text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+            <section>
+              <h2 className="mb-2.5 px-[18px] text-[11.5px] font-semibold uppercase tracking-[0.14em] text-heat-text">
                 该联系了
               </h2>
-              <ul className="-mx-1">
-                {fading.slice(0, 5).map((person) => (
-                  <PersonRow key={person.id} person={person} />
-                ))}
-              </ul>
-            </div>
+              <div className="panel p-2">
+                <ul>
+                  {fading.slice(0, 5).map((person) => (
+                    <PersonRow key={person.id} person={person} />
+                  ))}
+                </ul>
+              </div>
+            </section>
           ) : null}
 
-          <div>
-            <h2 className="mb-1.5 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <section>
+            <h2 className="mb-2.5 px-[18px] text-[11.5px] font-semibold uppercase tracking-[0.14em] text-ink-3">
               最近联系
             </h2>
             {recent.length === 0 ? (
               <EmptyState
-                icon={<Users className="size-5" />}
                 title="还没有人物"
                 description="先去建一位人物，记录才有归属。"
                 action={
                   <Link
                     to="/organizations"
-                    className="rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-primary hover:text-primary"
+                    className="inline-flex h-9 items-center rounded-full border border-hairline bg-card px-4 text-[13px] font-medium text-foreground shadow-xs transition-colors hover:bg-hover"
                   >
                     新建人物
                   </Link>
                 }
               />
             ) : (
-              <ul className="-mx-1">
-                {recent.slice(0, 5).map((person) => (
-                  <PersonRow key={person.id} person={person} />
-                ))}
-              </ul>
+              <div className="panel p-2">
+                <ul>
+                  {recent.slice(0, 5).map((person) => (
+                    <PersonRow key={person.id} person={person} />
+                  ))}
+                </ul>
+              </div>
             )}
-          </div>
+          </section>
 
           {newcomers.length > 0 ? (
-            <div className="rounded-xl border border-dashed border-border p-3">
-              <h2 className="mb-1 flex items-center gap-1.5 px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                <Sparkles className="size-3" />
+            <section>
+              <h2 className="mb-2.5 px-[18px] text-[11.5px] font-semibold uppercase tracking-[0.14em] text-ink-3">
                 新面孔
               </h2>
-              <ul className="-mx-1">
-                {newcomers.map((person) => (
-                  <li key={person.id}>
-                    <Link to={`/persons/${person.id}`} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-muted">
-                      <Avatar name={person.name} id={person.id} size="sm" className="size-6 text-[10px]" />
-                      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{person.name}</span>
-                      <span className="shrink-0 text-[11px] text-muted-foreground">
-                        {person.created_at ? relativeTime(person.created_at.slice(0, 10)) : ''}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
+              <div className="panel p-2">
+                <ul>
+                  {newcomers.map((person) => (
+                    <li key={person.id}>
+                      <Link
+                        to={`/persons/${person.id}`}
+                        className="flex items-center gap-2.5 rounded-md px-3 py-2 transition-colors hover:bg-hover"
+                      >
+                        <Avatar name={person.name} id={person.id} size="sm" className="size-6 text-[10px]" />
+                        <span className="min-w-0 flex-1 truncate text-[13.5px] text-foreground">
+                          {person.name}
+                        </span>
+                        <span className="shrink-0 text-[11px] text-ink-4">
+                          {person.created_at ? relativeTime(person.created_at.slice(0, 10)) : ''}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
           ) : null}
         </aside>
       </div>

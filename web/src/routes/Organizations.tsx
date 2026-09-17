@@ -8,6 +8,7 @@ import { Avatar, EmptyState, Field, PageHeader, SectionCard } from '../component
 import { organizationApi, personApi } from '../api/client';
 import type { Organization, Person, PersonWithActivity } from '../api/types';
 import { RELATION_OPTIONS } from '../relationOptions';
+import { useEnterState } from '../lib/overlay';
 import { cn } from '../lib/utils';
 
 /** 组织分类是封闭的三个：公司 / 政府 / 其他。 */
@@ -27,6 +28,10 @@ const EMPTY_PERSON_DRAFT = {
   notes: '',
 };
 
+/** Row-level action: invisible until the row is hovered, so the list stays quiet. */
+const ROW_ACTION =
+  'flex size-7 items-center justify-center rounded-full text-ink-4 transition-colors hover:bg-fill hover:text-foreground';
+
 export default function Organizations() {
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [persons, setPersons] = useState<PersonWithActivity[]>([]);
@@ -39,6 +44,8 @@ export default function Organizations() {
   const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
   const [orgDraft, setOrgDraft] = useState(EMPTY_ORG_DRAFT);
   const [savingOrg, setSavingOrg] = useState(false);
+  // The layer mounts already-open, so it needs the frame to transition from.
+  const orgFormState = useEnterState(orgFormOpen);
 
   // Person state: filter by organisation, then CRUD.
   const [orgFilter, setOrgFilter] = useState('');
@@ -225,41 +232,43 @@ export default function Organizations() {
     return <Spinner label="载入人物与组织…" />;
   }
 
+  const field = `${controlClass} h-9 text-[13px]`;
+
   return (
     <div>
       <PageHeader title="人物与组织" />
 
       {error ? (
-        <div className="mb-4">
+        <div className="mb-5">
           <ErrorNote>{error}</ErrorNote>
         </div>
       ) : null}
       {notice ? (
-        <div className="mb-4">
+        <div className="mb-5">
           <Notice>{notice}</Notice>
         </div>
       ) : null}
 
       <div className="grid gap-5 lg:grid-cols-[22rem_minmax(0,1fr)]">
         {/* —— 左侧：组织 —— */}
-        <aside className="space-y-4">
-          <SectionCard
-            title="组织"
-            bodyClassName="p-3"
-            actions={
-              <Button size="sm" variant="ghost" onClick={openCreateOrg} title="新建组织">
+        <aside>
+          <section className="panel">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-5 py-3.5">
+              <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">组织</h2>
+              <button
+                onClick={openCreateOrg}
+                title="新建组织"
+                aria-label="新建组织"
+                className="flex size-7 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-fill hover:text-foreground"
+              >
                 <Plus className="size-4" />
-              </Button>
-            }
-          >
+              </button>
+            </div>
+
             {orgs.length === 0 ? (
-              <EmptyState
-                icon={<Building2 className="size-6" />}
-                title="还没有组织"
-                description="点右上角 + 新建一个组织，再往里放人。"
-              />
+              <EmptyState icon={<Building2 className="size-6" />} title="还没有组织" description="点右上角 + 新建一个组织，再往里放人。" />
             ) : (
-              <ul className="space-y-1">
+              <ul className="panel-rows">
                 {orgs.map((org) => {
                   const active = orgFilter === org.id;
                   const archived = Boolean(org.archived_at);
@@ -268,41 +277,46 @@ export default function Organizations() {
                       <button
                         onClick={() => setOrgFilter(active ? '' : org.id)}
                         className={cn(
-                          'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 pr-16 text-left transition-colors',
-                          active ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-muted',
+                          'flex w-full items-center gap-2.5 py-2.5 pl-5 pr-16 text-left transition-colors',
+                          active ? 'bg-fill' : 'hover:bg-hover',
                         )}
                       >
-                        <Building2 className={cn('size-4 shrink-0', archived ? 'text-muted-foreground/50' : 'text-primary')} />
+                        <Building2 className={cn('size-4 shrink-0', archived ? 'text-faint' : 'text-ink-3')} />
                         <span className="min-w-0 flex-1">
-                          <span className={cn('block truncate text-sm font-medium', archived ? 'text-muted-foreground line-through' : 'text-foreground')}>
+                          <span
+                            className={cn(
+                              'block truncate text-[13.5px]',
+                              archived
+                                ? 'text-ink-4 line-through'
+                                : active
+                                  ? 'font-semibold text-foreground'
+                                  : 'font-medium text-foreground',
+                            )}
+                          >
                             {org.name}
                           </span>
-                          <span className="block truncate text-xs text-muted-foreground">
+                          <span className="block truncate text-[12px] text-ink-3">
                             {org.kind || '其他'}
                             {archived ? ' · 已归档' : ''}
                           </span>
                         </span>
                       </button>
                       {/* Row-level edit / archive / delete; hover-revealed so the list stays quiet. */}
-                      <div className="absolute right-2 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                        <button
-                          onClick={() => openEditOrg(org)}
-                          title={`编辑「${org.name}」`}
-                          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-                        >
+                      <div className="absolute right-2 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                        <button onClick={() => openEditOrg(org)} title={`编辑「${org.name}」`} className={ROW_ACTION}>
                           <Pencil className="size-3.5" />
                         </button>
                         <button
                           onClick={() => void toggleArchiveOrg(org)}
                           title={archived ? `恢复「${org.name}」` : `归档「${org.name}」`}
-                          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                          className={ROW_ACTION}
                         >
                           {archived ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
                         </button>
                         <button
                           onClick={() => void deleteOrg(org)}
                           title={`删除「${org.name}」`}
-                          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-background hover:text-red-600"
+                          className={`${ROW_ACTION} hover:text-destructive`}
                         >
                           <Trash2 className="size-3.5" />
                         </button>
@@ -312,28 +326,28 @@ export default function Organizations() {
                 })}
               </ul>
             )}
-          </SectionCard>
+          </section>
         </aside>
 
         {/* —— 右侧：人物 —— */}
         <section className="min-w-0">
           {personFormOpen ? (
-            <SectionCard title={editingPerson ? `编辑人物：${editingPerson.name}` : '新建人物'} bodyClassName="p-4">
-              <div className="grid gap-3 md:grid-cols-2">
+            <SectionCard title={editingPerson ? `编辑人物：${editingPerson.name}` : '新建人物'} className="mb-5">
+              <div className="grid gap-3.5 md:grid-cols-2">
                 <Field label="姓名">
                   <input
                     autoFocus
                     value={personDraft.name}
                     onChange={(e) => setPersonDraft({ ...personDraft, name: e.target.value })}
                     placeholder="必填"
-                    className={`${controlClass} h-9`}
+                    className={controlClass}
                   />
                 </Field>
                 <Field label="性别">
                   <select
                     value={personDraft.gender}
                     onChange={(e) => setPersonDraft({ ...personDraft, gender: e.target.value })}
-                    className={`${controlClass} h-9`}
+                    className={controlClass}
                   >
                     {GENDERS.map((g) => (
                       <option key={g} value={g}>
@@ -346,7 +360,7 @@ export default function Organizations() {
                   <select
                     value={personDraft.relation}
                     onChange={(e) => setPersonDraft({ ...personDraft, relation: e.target.value })}
-                    className={`${controlClass} h-9`}
+                    className={controlClass}
                   >
                     {RELATION_OPTIONS.map((r) => (
                       <option key={r} value={r}>
@@ -359,7 +373,7 @@ export default function Organizations() {
                   <select
                     value={personDraft.org_id}
                     onChange={(e) => setPersonDraft({ ...personDraft, org_id: e.target.value })}
-                    className={`${controlClass} h-9`}
+                    className={controlClass}
                   >
                     <option value="">无组织</option>
                     {activeOrgs.map((org) => (
@@ -374,7 +388,7 @@ export default function Organizations() {
                     value={personDraft.position}
                     onChange={(e) => setPersonDraft({ ...personDraft, position: e.target.value })}
                     placeholder="可选"
-                    className={`${controlClass} h-9`}
+                    className={controlClass}
                   />
                 </Field>
                 <div className="md:col-span-2">
@@ -383,15 +397,14 @@ export default function Organizations() {
                       value={personDraft.notes}
                       onChange={(e) => setPersonDraft({ ...personDraft, notes: e.target.value })}
                       rows={2}
-                      className={`${controlClass} h-auto`}
+                      className={`${controlClass} h-auto resize-y py-3 leading-[1.85]`}
                     />
                   </Field>
                 </div>
               </div>
-              <div className="mt-3 flex justify-end gap-2">
+              <div className="mt-4 flex justify-end gap-2">
                 <Button
                   variant="ghost"
-                  size="sm"
                   onClick={() => {
                     setPersonFormOpen(false);
                     setEditingPerson(null);
@@ -400,20 +413,20 @@ export default function Organizations() {
                 >
                   取消
                 </Button>
-                <Button size="sm" onClick={() => void savePerson()} disabled={savingPerson || !personDraft.name.trim()}>
+                <Button onClick={() => void savePerson()} disabled={savingPerson || !personDraft.name.trim()}>
                   {savingPerson ? '保存中…' : '保存'}
                 </Button>
               </div>
             </SectionCard>
           ) : null}
 
-          <SectionCard
-            title={
-              <div className="flex items-center gap-2">
+          <section className="panel">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-5 py-3.5">
+              <div className="flex min-w-0 items-center gap-2.5">
                 <select
                   value={orgFilter}
                   onChange={(e) => setOrgFilter(e.target.value)}
-                  className={`${controlClass} h-8 w-44 text-sm`}
+                  className={`${field} w-44`}
                   aria-label="按组织筛选人物"
                 >
                   <option value="">全部人物</option>
@@ -424,10 +437,10 @@ export default function Organizations() {
                     </option>
                   ))}
                 </select>
-                <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">共 {visiblePersons.length} 位</span>
+                <span className="shrink-0 whitespace-nowrap text-[12px] tabular-nums text-ink-3">
+                  共 {visiblePersons.length} 位
+                </span>
               </div>
-            }
-            actions={
               <Button
                 size="sm"
                 onClick={() => {
@@ -439,9 +452,8 @@ export default function Organizations() {
                 <Plus className="size-3.5" />
                 新建人物
               </Button>
-            }
-            bodyClassName="p-3"
-          >
+            </div>
+
             {visiblePersons.length === 0 ? (
               <EmptyState
                 icon={<Users className="size-6" />}
@@ -449,37 +461,38 @@ export default function Organizations() {
                 description={orgFilter ? '换一个筛选，或点右上角「新建人物」。' : '点右上角「新建人物」开始。'}
               />
             ) : (
-              <ul className="space-y-1">
+              <ul className="panel-rows">
                 {visiblePersons.map((person) => (
                   <li
                     key={person.id}
-                    className="group grid grid-cols-[minmax(0,1fr)_3rem_minmax(0,9rem)_minmax(0,9rem)_auto] items-center gap-3 rounded-lg px-2.5 py-2 transition-colors hover:bg-muted"
+                    className="group grid grid-cols-[minmax(0,1fr)_3rem_minmax(0,9rem)_minmax(0,9rem)_auto] items-center gap-3 px-5 py-3 transition-colors hover:bg-hover"
                   >
                     <div className="flex min-w-0 items-center gap-3">
                       <Avatar name={person.name} id={person.id} size="md" />
-                      <Link to={`/persons/${person.id}`} className="truncate text-sm font-medium text-foreground hover:text-primary">
+                      <Link
+                        to={`/persons/${person.id}`}
+                        className="truncate text-[13.5px] font-medium text-foreground hover:text-primary"
+                      >
                         {person.name}
                       </Link>
                       {person.is_self ? (
-                        <Badge variant="secondary" className="shrink-0">我</Badge>
+                        <Badge variant="secondary" className="shrink-0">
+                          我
+                        </Badge>
                       ) : null}
                     </div>
-                    <span className="truncate text-xs text-muted-foreground">{person.gender || '—'}</span>
-                    <span className="hidden truncate text-xs text-muted-foreground sm:block">{person.org_name || '—'}</span>
-                    <span className="hidden truncate text-xs text-muted-foreground md:block">{person.position || '—'}</span>
-                    <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                      <button
-                        onClick={() => startEditPerson(person)}
-                        title={`编辑「${person.name}」`}
-                        className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-                      >
+                    <span className="truncate text-[12px] text-ink-3">{person.gender || '—'}</span>
+                    <span className="hidden truncate text-[12px] text-ink-3 sm:block">{person.org_name || '—'}</span>
+                    <span className="hidden truncate text-[12px] text-ink-3 md:block">{person.position || '—'}</span>
+                    <div className="flex gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                      <button onClick={() => startEditPerson(person)} title={`编辑「${person.name}」`} className={ROW_ACTION}>
                         <Pencil className="size-3.5" />
                       </button>
                       {person.is_self ? null : (
                         <button
                           onClick={() => void deletePerson(person)}
                           title={`删除「${person.name}」`}
-                          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-background hover:text-red-600"
+                          className={`${ROW_ACTION} hover:text-destructive`}
                         >
                           <Trash2 className="size-3.5" />
                         </button>
@@ -489,38 +502,51 @@ export default function Organizations() {
                 ))}
               </ul>
             )}
-          </SectionCard>
+          </section>
         </section>
       </div>
 
       {/* —— 新建/编辑组织：弹出式窗口 —— */}
       {orgFormOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-background/70 p-4 pt-[12vh] backdrop-blur-sm"
+          data-state={orgFormState}
+          className="al-scrim fixed inset-0 z-50 flex items-start justify-center p-4 pt-[12vh]"
+          role="dialog"
+          aria-modal="true"
           onClick={closeOrgForm}
         >
           <div
-            className="w-full max-w-sm overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+            className="al-sheet w-full max-w-sm overflow-hidden rounded-2xl bg-card/85 shadow-overlay"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-              <h2 className="text-sm font-semibold text-foreground">{editingOrg ? `编辑组织：${editingOrg.name}` : '新建组织'}</h2>
-              <button onClick={closeOrgForm} aria-label="关闭" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+            <div className="flex items-center justify-between border-b border-hairline px-5 py-3.5">
+              <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">
+                {editingOrg ? `编辑组织：${editingOrg.name}` : '新建组织'}
+              </h2>
+              <button
+                onClick={closeOrgForm}
+                aria-label="关闭"
+                className="flex size-8 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-fill hover:text-foreground"
+              >
                 <X className="size-4" />
               </button>
             </div>
-            <div className="space-y-3 p-5">
+            <div className="space-y-3.5 p-5">
               <Field label="名称">
                 <input
                   autoFocus
                   value={orgDraft.name}
                   onChange={(e) => setOrgDraft({ ...orgDraft, name: e.target.value })}
                   placeholder="必填"
-                  className={`${controlClass} h-9`}
+                  className={controlClass}
                 />
               </Field>
               <Field label="类型">
-                <select value={orgDraft.kind} onChange={(e) => setOrgDraft({ ...orgDraft, kind: e.target.value })} className={`${controlClass} h-9`}>
+                <select
+                  value={orgDraft.kind}
+                  onChange={(e) => setOrgDraft({ ...orgDraft, kind: e.target.value })}
+                  className={controlClass}
+                >
                   {ORG_KINDS.map((kind) => (
                     <option key={kind} value={kind}>
                       {kind}
@@ -529,10 +555,10 @@ export default function Organizations() {
                 </select>
               </Field>
               <div className="flex justify-end gap-2 pt-1">
-                <Button variant="ghost" size="sm" onClick={closeOrgForm}>
+                <Button variant="ghost" onClick={closeOrgForm}>
                   取消
                 </Button>
-                <Button size="sm" onClick={() => void saveOrg()} disabled={savingOrg || !orgDraft.name.trim()}>
+                <Button onClick={() => void saveOrg()} disabled={savingOrg || !orgDraft.name.trim()}>
                   {savingOrg ? '保存中…' : editingOrg ? '保存' : '创建'}
                 </Button>
               </div>

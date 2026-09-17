@@ -13,7 +13,7 @@ interface Props {
   onRecorded: (event: Event, report: IngestReport) => void;
   /** Present when the host page can take the user straight to the advice flow. */
   onAsk?: (event: Event) => void;
-  /** Set when the host already wraps this in a card, to avoid double borders. */
+  /** Set when the host already wraps this in a panel, to avoid a double surface. */
   bare?: boolean;
   /** Show the org → person picker for co-participants (relationship records). */
   participantPicker?: boolean;
@@ -125,25 +125,27 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
     setPickerPerson('');
   };
 
+  const field = `${controlClass} h-9 text-[12.5px] text-ink-2`;
+
   return (
-    <div className={cn(bare ? '' : 'rounded-xl border border-border bg-card p-4 shadow-sm')}>
+    <div className={cn(bare ? '' : 'panel p-5')}>
       {bare ? (
-        <div className="mb-2 flex items-center justify-end gap-3">
+        <div className="mb-3 flex items-center justify-end gap-3">
           <input
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className={`${controlClass} h-8 w-auto px-2 py-0 text-xs text-muted-foreground`}
+            className={`${field} w-auto px-2.5`}
           />
         </div>
       ) : (
         <div className="mb-3 flex items-center justify-between gap-3">
-          <span className="text-sm font-medium text-foreground">记一笔</span>
+          <span className="text-[13.5px] font-semibold tracking-[-0.01em] text-foreground">记一笔</span>
           <input
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className={`${controlClass} h-auto w-auto px-2 py-1 text-muted-foreground`}
+            className={`${field} w-auto px-2.5`}
           />
         </div>
       )}
@@ -157,11 +159,13 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
         }}
         rows={4}
         placeholder="今天发生了什么？直接写，AI 会提取摘要、你的感受、对方的反应和承诺。"
-        className="resize-y text-base leading-6"
+        className="resize-y text-[15px] leading-[1.75]"
       />
 
+      {/* Co-participants: a quiet secondary group, not a boxed-in aside — the
+          picker is optional, and a dashed frame made it read as required. */}
       {participantPicker ? (
-        <div className="mt-3 rounded-lg border border-dashed border-border p-3">
+        <div className="mt-3 rounded-md bg-fill p-3">
           <div className="flex items-center gap-2">
             <select
               value={pickerOrg}
@@ -169,7 +173,7 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
                 setPickerOrg(e.target.value);
                 setPickerPerson('');
               }}
-              className={`${controlClass} h-8 min-w-0 flex-[2] text-xs`}
+              className={`${field} min-w-0 flex-[2]`}
               aria-label="选择组织"
             >
               <option value="">选择组织…</option>
@@ -183,7 +187,7 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
             <select
               value={pickerPerson}
               onChange={(e) => setPickerPerson(e.target.value)}
-              className={`${controlClass} h-8 min-w-0 flex-[2] text-xs`}
+              className={`${field} min-w-0 flex-[2]`}
               aria-label="选择人名"
               disabled={!pickerOrg}
             >
@@ -199,7 +203,7 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
             </Button>
           </div>
           {picked.length > 0 ? (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+            <div className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-1 text-[12px] text-ink-3">
               <span>已添加：</span>
               {picked.map((p, i) => (
                 <span key={p.person_id} className="inline-flex items-center gap-0.5 whitespace-nowrap">
@@ -207,7 +211,7 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
                   <button
                     onClick={() => setPicked((current) => current.filter((x) => x.person_id !== p.person_id))}
                     aria-label={`移除${p.person_name}`}
-                    className="text-muted-foreground hover:text-red-600"
+                    className="rounded-full p-0.5 text-ink-4 transition-colors hover:text-destructive"
                   >
                     <X className="size-3" />
                   </button>
@@ -219,17 +223,12 @@ export default function QuickRecord({ personId, onRecorded, onAsk, bare = false,
         </div>
       ) : null}
 
-      <div className="mt-3 flex flex-wrap items-center gap-3">
+      <div className="mt-3.5 flex flex-wrap items-center gap-3">
         <Button onClick={() => submit(false)} disabled={busy || !text.trim()}>
           记录
         </Button>
         {onAsk ? (
-          <Button
-            onClick={() => submit(true)}
-            disabled={busy || !text.trim()}
-            variant="outline"
-            className="border-primary text-primary hover:bg-primary/10 hover:text-primary"
-          >
+          <Button onClick={() => submit(true)} disabled={busy || !text.trim()} variant="outline">
             记录并提问
           </Button>
         ) : null}

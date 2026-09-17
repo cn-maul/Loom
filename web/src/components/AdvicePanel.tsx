@@ -6,6 +6,7 @@ import { eventHeadline, quoteScript, shortDate } from '../format';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { ErrorNote, Notice, Spinner } from './ui';
+import { SectionCard } from './layout';
 
 interface Props {
   advice: AdviceSession;
@@ -64,119 +65,135 @@ export default function AdvicePanel({ advice, personName, onAdopted }: Props) {
   const evidenceFor = (ids: string[]) => <Evidence ids={ids} events={events} />;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {advice.source_stale === 1 ? (
         <Notice>
           这份建议的依据已经变了：{advice.source_stale_reason || '来源记录已修改或删除'}。下面引用的内容不再代表现状。
         </Notice>
       ) : null}
 
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-foreground">情况判断</h3>
-          <Badge variant="secondary">{RETRIEVAL_LABEL[advice.retrieval_status] ?? advice.retrieval_status}</Badge>
-        </div>
-        <p className="text-sm leading-7 text-foreground">{advice.situation.text}</p>
+      <SectionCard
+        title="情况判断"
+        actions={<Badge variant="secondary">{RETRIEVAL_LABEL[advice.retrieval_status] ?? advice.retrieval_status}</Badge>}
+      >
+        <p className="text-[14px] leading-[1.85] text-ink-2">{advice.situation.text}</p>
         {evidenceFor(advice.situation.evidence_event_ids)}
         {advice.other_perspective.text ? (
-          <div className="mt-3 border-t border-border pt-3">
-            <p className="text-sm leading-7 text-muted-foreground">
+          <div className="mt-3.5 border-t border-hairline pt-3.5">
+            <p className="text-[14px] leading-[1.85] text-ink-2">
               <span className="font-medium text-foreground">对方的视角：</span>
               {advice.other_perspective.text}
             </p>
             {evidenceFor(advice.other_perspective.evidence_event_ids)}
           </div>
         ) : null}
-      </div>
+      </SectionCard>
 
       {advice.risks.length > 0 ? (
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <h3 className="mb-2 text-sm font-semibold text-foreground">风险</h3>
-          <ul className="space-y-2 text-sm leading-6">
+        <SectionCard title="风险">
+          <ul className="space-y-2.5">
             {advice.risks.map((risk, index) => (
-              <li key={`${index}-${risk.text}`} className="text-muted-foreground">
-                <span className="mr-1 text-foreground">·</span>
+              <li key={`${index}-${risk.text}`} className="text-[13.5px] leading-[1.7] text-ink-2">
+                <span className="mr-1.5 text-ink-4">·</span>
                 {risk.text}
                 {evidenceFor(risk.evidence_event_ids)}
               </li>
             ))}
           </ul>
-        </div>
+        </SectionCard>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2">
-        {advice.strategies.map((strategy, index) => {
-          const adopted = advice.adopted_strategy_index === index;
-          return (
-            <div key={`${index}-${strategy.name}`} className="flex flex-col rounded-xl border border-border bg-card p-4 shadow-sm">
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="text-sm font-semibold text-primary">{strategy.name}</h3>
-                {adopted ? <Badge variant="secondary">已采纳</Badge> : null}
-              </div>
-              {strategy.script ? (
-                <p className="mt-2 rounded-lg bg-muted px-3 py-2 text-sm leading-7 text-foreground">
-                  {quoteScript(strategy.script)}
-                </p>
-              ) : null}
-              <div className="mt-2 space-y-1 text-xs leading-5">
-                {strategy.pros ? <p className="text-green-700 dark:text-green-400">优点：{strategy.pros}</p> : null}
-                {strategy.cons ? <p className="text-muted-foreground">缺点：{strategy.cons}</p> : null}
-              </div>
-              {evidenceFor(strategy.evidence_event_ids)}
-              <div className="mt-3">
-                <Button variant="outline" size="sm" disabled={adopting !== null} onClick={() => void adopt(index)}>
-                  {adopting === index ? '转出中…' : adopted ? '再转一次跟进事项' : '采纳并转为跟进事项'}
-                </Button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {/* Strategies are sibling options, so they share ONE panel separated by
+          hairlines — a grid of individually-bordered cards would read as a bag
+          of islands. The accent lives on the button, not on the heading. */}
+      {advice.strategies.length > 0 ? (
+        <section className="panel">
+          <div className="border-b border-hairline px-5 py-[13px]">
+            <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">可选做法</h2>
+          </div>
+          <ul className="panel-rows">
+            {advice.strategies.map((strategy, index) => {
+              const adopted = advice.adopted_strategy_index === index;
+              return (
+                <li key={`${index}-${strategy.name}`} className="px-5 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <h3 className="text-[14px] font-semibold tracking-[-0.01em] text-foreground">{strategy.name}</h3>
+                    {adopted ? <Badge className="bg-live-bg text-live-text">已采纳</Badge> : null}
+                  </div>
+
+                  {strategy.script ? (
+                    <p className="mt-2.5 rounded-md bg-fill px-3.5 py-3 text-[13.5px] leading-[1.85] text-ink-2">
+                      {quoteScript(strategy.script)}
+                    </p>
+                  ) : null}
+
+                  <div className="mt-2.5 space-y-1 text-[12.5px] leading-[1.65]">
+                    {strategy.pros ? <p className="text-live-text">优点：{strategy.pros}</p> : null}
+                    {strategy.cons ? <p className="text-ink-3">缺点：{strategy.cons}</p> : null}
+                  </div>
+
+                  {evidenceFor(strategy.evidence_event_ids)}
+
+                  <div className="mt-3.5">
+                    <Button variant="outline" size="sm" disabled={adopting !== null} onClick={() => void adopt(index)}>
+                      {adopting === index ? '转出中…' : adopted ? '再转一次跟进事项' : '采纳并转为跟进事项'}
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
 
       {followUpIds.length > 0 ? (
-        <p className="text-xs text-muted-foreground">已从这份建议转出 {followUpIds.length} 条跟进事项。</p>
+        <p className="text-[12px] text-ink-3">已从这份建议转出 {followUpIds.length} 条跟进事项。</p>
       ) : null}
+
       {error ? <ErrorNote>{error}</ErrorNote> : null}
 
       {advice.follow_up.text ? (
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <h3 className="mb-1 text-sm font-semibold text-foreground">后续跟进</h3>
-          <p className="text-sm leading-7 text-muted-foreground">{advice.follow_up.text}</p>
+        <SectionCard title="后续跟进">
+          <p className="text-[13.5px] leading-[1.85] text-ink-2">{advice.follow_up.text}</p>
           {evidenceFor(advice.follow_up.evidence_event_ids)}
-        </div>
+        </SectionCard>
       ) : null}
 
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-        <h3 className="mb-2 text-sm font-semibold text-foreground">依据的记录</h3>
+      <SectionCard title="依据的记录">
         {events === null ? (
           <Spinner label="载入依据…" />
         ) : advice.evidence_event_ids.length === 0 ? (
-          <p className="text-sm text-muted-foreground">这次回答没有引用具体记录，结论来自画像和常理推断。</p>
+          <p className="text-[13px] leading-[1.7] text-muted-foreground">
+            这次回答没有引用具体记录，结论来自画像和常理推断。
+          </p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="panel-rows">
             {advice.evidence_event_ids.map((id) => {
               const event = events[id];
               if (!event) {
                 return (
-                  <li key={id} className="text-sm text-muted-foreground">
+                  <li key={id} className="py-2 text-[13px] text-muted-foreground">
                     记录已删除（{id.slice(0, 8)}…）
                   </li>
                 );
               }
               return (
-                <li key={id} className="text-sm">
-                  <Link to={`/events/${event.id}`} className="leading-6 text-foreground hover:text-primary">
-                    <span className="mr-2 font-mono text-xs text-muted-foreground">{shortDate(event.event_date)}</span>
+                <li key={id} className="flex flex-wrap items-baseline gap-x-2 py-2">
+                  <Link
+                    to={`/events/${event.id}`}
+                    className="text-[13.5px] leading-[1.6] text-foreground hover:text-primary"
+                  >
+                    <span className="mr-2 tabular-nums text-[12px] text-ink-3">{shortDate(event.event_date)}</span>
                     {eventHeadline(event.summary, event.raw_text)}
                   </Link>
-                  <span className="ml-2 text-xs text-muted-foreground">{personName}</span>
+                  <span className="text-[12px] text-ink-3">{personName}</span>
                 </li>
               );
             })}
           </ul>
         )}
-        {advice.model ? <p className="mt-3 text-xs text-muted-foreground">由 {advice.model} 生成</p> : null}
-      </div>
+        {advice.model ? <p className="mt-3.5 text-[12px] text-ink-3">由 {advice.model} 生成</p> : null}
+      </SectionCard>
     </div>
   );
 }
@@ -184,13 +201,13 @@ export default function AdvicePanel({ advice, personName, onAdopted }: Props) {
 /** Renders the records one conclusion rests on, or says plainly that it has none. */
 function Evidence({ ids, events }: { ids: string[]; events: Record<string, Event> | null }) {
   if (ids.length === 0) {
-    return <p className="mt-1 text-xs text-muted-foreground">无直接记录依据</p>;
+    return <p className="mt-1.5 text-[12px] text-ink-4">无直接记录依据</p>;
   }
   if (events === null) {
-    return <p className="mt-1 text-xs text-muted-foreground">载入依据…</p>;
+    return <p className="mt-1.5 text-[12px] text-ink-4">载入依据…</p>;
   }
   return (
-    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+    <p className="mt-1.5 text-[12px] leading-[1.7] text-ink-3">
       依据：
       {ids.map((id, index) => {
         const event = events[id];

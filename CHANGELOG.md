@@ -3,6 +3,59 @@
 本文件记录 Loom 的显著变更。格式参考 Keep a Changelog；数据库 schema 版本与 API 版本
 在对应条目中注明。
 
+## [1.3.0] - 2026-09-17
+
+**纯前端视觉层重构。** API 路由、请求/响应形状、数据库 schema 与 Go 代码零变化：
+路由仍为 54 条，`routes.golden.txt` 未重新生成，`go test ./...` 不受影响。
+
+### 变更
+
+- **前端视觉语言整体切换为 Apple Liquid Glass**。`web/src/index.css` 重写为两层
+  token：第一层 `--al-*` 是唯一真源（页面地面 `#f5f5f7`、白色面板、hairline 分隔、
+  灰度正文配单一强调色 `#0071e3`）；第二层把 shadcn 风格的 `--background` /
+  `--card` / `--muted` / `--border` 等经 `@theme inline` 重新指向 `--al-*`，因此既有
+  标记里的 `bg-card` / `border-border` / `text-muted-foreground` 不改一行就渲染成新
+  语言。amber / red / green / emerald 四族重声明为半透明系统色，明暗自动适配，
+  **组件中所有 `dark:` 配对随之删除**。
+- 九个路由页与十六个组件按新语言重排（`App.tsx`、`components/layout.tsx`、
+  Home / Events / Organizations / Advice / Report / PersonDetail / EventDetail /
+  Settings，以及 `ui.tsx` 与 `ui/` 基础件、`AdvicePanel`、`PersonPicker`、
+  `QuickRecord`、`QuickRecordModal`、`CommandPalette`、`EventTimeline`、
+  `EventStatus`、`TraitList`）。核心手法是**消灭碎片化卡片**：同级条目（报告分桶、
+  AI 策略、历史快照、参与人、时间线）原本各带边框与底色，现在统一为「一个白色
+  面板 + hairline 分隔行」。
+- **间距与排版对齐参照实现**：区块间距 `space-y-5`(20px) → `space-y-9`(36px)；
+  列表行内距改由 `.panel-rows` 自带（`13px 18px`）；eyebrow 小标题字距
+  `0.08em` → `0.14em`，缩进与行内头像对齐。
+- 玻璃效果收敛到真正发生层叠的位置：sticky 顶栏、弹窗遮罩与面板。普通内容块是
+  纯白加双层柔和阴影，不使用模糊。
+- 选中态由「彩色底 + ring」改为「安静填充 + 字重」，与 `App.tsx` 的 `NavItem` 统一。
+
+### 新增
+
+- `web/src/lib/overlay.ts`：`useEnterState` —— 条件挂载的弹窗需要一个过渡起点，
+  否则首次渲染即为 `open`、没有起始状态可插值，出场会硬闪；常驻挂载的层直接把
+  `data-state` 绑到 prop 上，不走这个 hook。
+- 语义 token 工具类：`text-ink-2/3/4`、`text-faint`、`bg-fill`、`bg-hover`、
+  `bg-track`、`border-hairline`、`bg-heat-bg`/`text-heat-text`、
+  `bg-live-bg`/`text-live-text`。状态用底纹片表达，不用彩色描边 chip。
+- 组件层模式类：`.panel`（内容面）、`.panel-rows`（行列表，自带行内距与分隔线）、
+  `.glass-nav`（hairline 仅在下滚后出现）、`.al-scrim` / `.al-sheet`（叠层弹窗）。
+- 三套降级查询：`prefers-reduced-motion`、`prefers-reduced-transparency`、
+  `prefers-contrast`。
+
+### 修复
+
+- **列表文字贴着面板边缘**：`.panel-rows` 原先只加分隔线、不设内距，行内距全靠每个
+  `<li>` 自觉写，漏一个文字就贴到 22px 圆角内侧——看起来像从圆角里溢出来。行内距
+  改为模式自身的属性（`.panel-rows > *`）。
+- **记录页表格的操作列被裁掉**：表格直接放进 `.panel`，宽度溢出被 `overflow:hidden`
+  切平，且首列 `px-4`(16px) 小于面板圆角。改为 `table-fixed` 让列宽受控，并把首末列
+  内距对齐面板内距。
+- 全仓散落的 `px-2.5`(10px) / `px-3`(12px) / `px-[18px]` 一类任意值统一到面板内距，
+  消除同一页面内不同缩进并存。
+- `components/ui.tsx` 中 `Spinner` 标签漏改的 `text-sm` 清理。
+
 ## [1.2.0] - 2026-09-15
 
 ### 移除
